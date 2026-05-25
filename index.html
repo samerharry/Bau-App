@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Bauabnahme</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+  <meta name="theme-color" content="#2E7D32">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+</head>
+<body>
+
+<!-- ══ Header ════════════════════════════════════════════════════════════════ -->
+<header id="app-header">
+  <button id="btn-back" class="header-btn" onclick="goBack()">←</button>
+  <h1 id="header-title">Bauabnahme</h1>
+  <button id="btn-floor-plan" class="header-btn" onclick="openFloorPlan()" style="display:none" title="Grundrisse">🗺️</button>
+  <button id="btn-report" class="header-btn" onclick="openReport(currentProjectId)" style="display:none" title="Bericht">📄</button>
+  <button id="btn-save"   class="header-btn" onclick="saveProject()" style="display:none" title="Speichern">✓</button>
+  <button id="btn-logout" class="header-btn" onclick="logout()" style="display:none" title="Abmelden">⏻</button>
+</header>
+
+<!-- ══ FAB ═══════════════════════════════════════════════════════════════════ -->
+<button id="fab" onclick="newProject()" title="Neues Projekt">+</button>
+
+<!-- ══ Toast ═════════════════════════════════════════════════════════════════ -->
+<div id="toast"></div>
+
+<!-- ══ Foto-Eingabe (versteckt) ══════════════════════════════════════════════ -->
+<input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none">
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<main>
+
+<!-- ── View: Login ────────────────────────────────────────────────────────── -->
+<section id="view-login" class="view active">
+  <div style="max-width:380px;margin:48px auto">
+    <div style="text-align:center;margin-bottom:24px">
+      <img src="icon.svg" style="width:72px;height:72px">
+      <h2 style="margin-top:12px;font-size:22px">Bauabnahme</h2>
+      <p style="color:var(--outline);font-size:13px;margin-top:4px">Energieberater-App</p>
+    </div>
+    <div class="card card-body">
+      <div id="auth-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;padding:10px;background:var(--error-bg);border-radius:8px"></div>
+      <div class="form-group">
+        <label for="auth-email">E-Mail</label>
+        <input type="email" id="auth-email" placeholder="name@beispiel.de" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="auth-password">Passwort</label>
+        <input type="password" id="auth-password" placeholder="Passwort" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')login()">
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="login()">Anmelden</button>
+      <button class="btn btn-outline"  style="width:100%"                  onclick="register()">Konto erstellen</button>
+      <p style="font-size:11px;color:var(--outline);text-align:center;margin-top:12px">
+        Daten werden sicher in Ihrer Supabase-Datenbank gespeichert.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── View: Projektliste ──────────────────────────────────────────────────── -->
+<section id="view-projects" class="view">
+  <div id="project-list"></div>
+  <div style="margin-top:8px;border-top:1px solid #E0E0E0;padding-top:16px">
+    <div style="font-size:12px;color:var(--outline);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Datenverwaltung</div>
+    <div class="btn-row">
+      <button class="btn btn-outline" style="font-size:13px;padding:8px 14px" onclick="exportData()">📤 Exportieren</button>
+      <label  class="btn btn-outline" style="font-size:13px;padding:8px 14px;cursor:pointer">
+        📥 Importieren
+        <input type="file" id="import-input" accept=".json" style="display:none" onchange="importData(this)">
+      </label>
+    </div>
+  </div>
+</section>
+
+<!-- ── View: Projekt anlegen / bearbeiten ────────────────────────────────── -->
+<section id="view-project-edit" class="view">
+
+  <div class="form-section">
+    <div class="form-section-title">📋 Stammdaten</div>
+    <div class="form-group">
+      <label for="f-project-type">Projektart</label>
+      <select id="f-project-type" onchange="onProjectTypeChange()">
+        <option value="BAUABNAHME">🔍 Bauabnahme / Qualitätssicherung</option>
+        <option value="ISFP">🏠 iSFP – Bestandsaufnahme vor Ort</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-name">Projektbezeichnung *</label>
+      <input type="text" id="f-name" placeholder="z. B. Sanierung Musterstraße 12">
+    </div>
+    <div class="form-group">
+      <label for="f-customer">Kunde / Auftraggeber *</label>
+      <input type="text" id="f-customer" placeholder="Name des Kunden">
+    </div>
+    <div class="form-group">
+      <label for="f-address">Adresse / Objekt</label>
+      <input type="text" id="f-address" placeholder="Straße, PLZ Ort">
+    </div>
+    <div class="form-group">
+      <label for="f-date">Begehungsdatum</label>
+      <input type="date" id="f-date">
+    </div>
+    <div class="form-group">
+      <label for="f-participants">Teilnehmer der Begehung</label>
+      <textarea id="f-participants" rows="3" placeholder="z. B. Harald Krause (Energieberater), Max Mustermann (Bauherr), Firma Muster GmbH (Ausführung)"></textarea>
+    </div>
+  </div>
+
+  <!-- Bauabnahme-spezifische Felder ─────────────────────────────────────── -->
+  <div id="s-bauabnahme-fields">
+
+  <div class="form-section">
+    <div class="form-section-title">💰 Projektart &amp; Förderung</div>
+    <div class="form-group">
+      <label for="f-funding">Projektart / Förderprogramm</label>
+      <select id="f-funding" onchange="onFundingChange()">
+        <option value="KFW_NEUBAU">KfW Klimafreundlicher Neubau (KFN)</option>
+        <option value="KFW_SANIERUNG">KfW Sanierung Effizienzhaus (BEG WG)</option>
+        <option value="KFW_HEIZUNG">KfW Heizungstausch (BEG EM · KfW 458)</option>
+        <option value="BAFA">BAFA Einzelmaßnahmen (BEG EM)</option>
+      </select>
+    </div>
+
+    <!-- KFN Neubau ──────────────────────────────────────────────────────── -->
+    <div id="s-kfw-neubau">
+      <div class="form-group">
+        <label for="f-kfw-neubau-level">KFN-Stufe</label>
+        <select id="f-kfw-neubau-level">
+          <option value="KFN">KFN Standard (Effizienzhaus 40)</option>
+          <option value="KFN_PLUS">KFN Plus (Effizienzhaus 40 + NH-Klasse / QNG)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- KfW Sanierung EH ───────────────────────────────────────────────── -->
+    <div id="s-kfw-san" style="display:none">
+      <div class="form-group">
+        <label for="f-kfw-san-level">Effizienzhaus-Stufe</label>
+        <select id="f-kfw-san-level">
+          <option value="KFW_40">Effizienzhaus 40</option>
+          <option value="KFW_55" selected>Effizienzhaus 55</option>
+          <option value="KFW_70">Effizienzhaus 70</option>
+          <option value="KFW_85">Effizienzhaus 85</option>
+          <option value="KFW_DENKMAL">Effizienzhaus Denkmal</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-kfw-class">Zusatzklasse</label>
+        <select id="f-kfw-class">
+          <option value="">Ohne Zusatzklasse</option>
+          <option value="EE">EE-Klasse (Erneuerbare Energien, ≥ 65 % EE)</option>
+          <option value="NH">NH-Klasse (Nachhaltigkeit / QNG-Siegel)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- KfW Heizungstausch ─────────────────────────────────────────────── -->
+    <div id="s-kfw-heizung" style="display:none">
+      <div class="form-group">
+        <label for="f-heizung-type">Neue Heizungsanlage</label>
+        <select id="f-heizung-type">
+          <option value="WAERMEPUMPE">Wärmepumpe (Luft, Sole oder Wasser)</option>
+          <option value="BIOMASSE">Biomasseheizung (Pellets / Hackschnitzel)</option>
+          <option value="HYBRID">Hybridheizung (Wärmepumpe + Gas/Öl)</option>
+          <option value="FERNWAERME">Fernwärme / Wärmenetz</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- BAFA Einzelmaßnahmen ───────────────────────────────────────────── -->
+    <div id="s-bafa" style="display:none">
+      <label>BAFA-Maßnahmen (Mehrfachauswahl)</label>
+      <div class="checkbox-list" id="f-bafa-measures">
+        <label class="checkbox-item"><input type="checkbox" value="WAERMEPUMPE"><label>Wärmepumpe</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="PELLETKESSEL"><label>Pelletkessel / Hackschnitzel</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="GAS_HYBRID"><label>Gas-Brennwertkessel (Hybrid)</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="SOLARTHERMIE"><label>Solarthermie</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="FASSADE"><label>Fassadendämmung</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="DACH"><label>Dachdämmung</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="KELLER"><label>Kellerdeckendämmung</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="FENSTER"><label>Fenster und Außentüren</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="LUEFTUNG"><label>Lüftungsanlage mit WRG</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="HEIZOPT"><label>Heizungsoptimierung</label></label>
+        <label class="checkbox-item"><input type="checkbox" value="FERNWAERME"><label>Fernwärme</label></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🔥 Wärmeerzeugung</div>
+    <div class="form-group">
+      <label for="f-heat-gen-type">Primäre Wärmeerzeugung</label>
+      <select id="f-heat-gen-type">
+        <option value="">– keine –</option>
+        <option value="WP_LUFT">Luftwärmepumpe (Luft/Wasser)</option>
+        <option value="WP_SOLE">Solewärmepumpe (Erde/Wasser)</option>
+        <option value="WP_WASSER">Grundwasserwärmepumpe</option>
+        <option value="WP_LL">Luft-Luft-Wärmepumpe</option>
+        <option value="GAS">Gas-Brennwertkessel</option>
+        <option value="OEL">Ölkessel</option>
+        <option value="PELLET">Pelletkessel</option>
+        <option value="HOLZ">Holzvergaser / Scheitholzkessel</option>
+        <option value="SOLAR">Solarthermie (Heizungsunterstützung)</option>
+        <option value="FERN">Fernwärme / Nahwärme</option>
+        <option value="BHKW">BHKW / Mikro-KWK</option>
+        <option value="HYBRID">Hybridheizung (WP + Gas)</option>
+        <option value="ELEKTRO">Elektrische Direktheizung</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-heat-gen-type2">Zweite Wärmeerzeugung (optional)</label>
+      <select id="f-heat-gen-type2">
+        <option value="">– keine –</option>
+        <option value="WP_LUFT">Luftwärmepumpe (Luft/Wasser)</option>
+        <option value="WP_SOLE">Solewärmepumpe (Erde/Wasser)</option>
+        <option value="WP_WASSER">Grundwasserwärmepumpe</option>
+        <option value="WP_LL">Luft-Luft-Wärmepumpe</option>
+        <option value="GAS">Gas-Brennwertkessel</option>
+        <option value="OEL">Ölkessel</option>
+        <option value="PELLET">Pelletkessel</option>
+        <option value="HOLZ">Holzvergaser / Scheitholzkessel</option>
+        <option value="SOLAR">Solarthermie (Heizungsunterstützung)</option>
+        <option value="FERN">Fernwärme / Nahwärme</option>
+        <option value="BHKW">BHKW / Mikro-KWK</option>
+        <option value="HYBRID">Hybridheizung (WP + Gas)</option>
+        <option value="ELEKTRO">Elektrische Direktheizung</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-heating-custom">Freier Zusatzpunkt</label>
+      <input type="text" id="f-heating-custom" placeholder="z. B. Warmwasserbereitung über WP …">
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">♨️ Wärmeverteilung</div>
+    <label>Art der Wärmeabgabe (Mehrfachauswahl möglich)</label>
+    <div class="checkbox-list" id="f-heat-dist" style="margin-top:8px">
+      <label class="checkbox-item"><input type="checkbox" value="HK"><label>Heizkörper</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="FBH"><label>Fußbodenheizung</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="WAND"><label>Wandheizung</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="DECK"><label>Deckenheizung</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="FC"><label>Gebläsekonvektoren / Fan Coils</label></label>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label for="f-heat-circuits">Anzahl Heizkreise</label>
+      <input type="number" id="f-heat-circuits" min="1" max="99" placeholder="z. B. 3">
+    </div>
+    <div class="form-group">
+      <label for="f-system-temp">Systemtemperatur VL/RL (°C)</label>
+      <input type="text" id="f-system-temp" placeholder="z. B. 55/45">
+    </div>
+    <div class="toggle-row">
+      <span>Heizungspuffer vorhanden</span>
+      <label class="switch"><input type="checkbox" id="f-heat-buffer"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Trinkwasserspeicher vorhanden</span>
+      <label class="switch"><input type="checkbox" id="f-dhw-storage"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Schichtenspeicher mit Frischwasserstation</span>
+      <label class="switch"><input type="checkbox" id="f-strat-storage"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Dämmung Leitungen &amp; Armaturen</span>
+      <label class="switch"><input type="checkbox" id="f-pipe-insulation"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Pumpen erneuert / hydraulisch optimiert</span>
+      <label class="switch"><input type="checkbox" id="f-pumps"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Etagenverteiler vorhanden</span>
+      <label class="switch"><input type="checkbox" id="f-floor-dist"><span class="slider"></span></label>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label for="f-distrib-custom">Freier Zusatzpunkt</label>
+      <input type="text" id="f-distrib-custom" placeholder="z. B. Thermostate erneuert …">
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">💨 Lüftungsanlage</div>
+    <div class="toggle-row">
+      <span>Lüftungsanlage vorhanden</span>
+      <label class="switch">
+        <input type="checkbox" id="f-vent" onchange="onToggle('f-vent','s-vent')">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="s-vent" style="display:none;margin-top:8px">
+      <div class="form-group">
+        <label for="f-vent-type">Art der Lüftungsanlage</label>
+        <select id="f-vent-type">
+          <option value="ZAL">Zentrale Lüftungsanlage (ZAL)</option>
+          <option value="ERG_ZU">Einzelraumgeräte – Zu-/Abluftgeräte (dezentral)</option>
+          <option value="ERG_PP">Einzelraumgeräte – Push-Pull-Systeme</option>
+          <option value="ERG">Einzelraumgeräte (dezentral, allgemein)</option>
+          <option value="ABL">Abluftanlage (ohne WRG)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-vent-custom">Freier Zusatzpunkt</label>
+        <input type="text" id="f-vent-custom" placeholder="z. B. Außenluftdurchlass erneuert …">
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">☀️ Photovoltaik</div>
+    <div class="toggle-row">
+      <span>Photovoltaikanlage vorhanden</span>
+      <label class="switch">
+        <input type="checkbox" id="f-pv" onchange="onToggle('f-pv','s-pv')">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="s-pv" style="display:none;margin-top:8px">
+      <div class="form-group">
+        <label for="f-pv-kwp">Anlagengröße (kWp)</label>
+        <input type="number" id="f-pv-kwp" step="0.1" min="0" placeholder="z. B. 9.9">
+      </div>
+      <div class="toggle-row">
+        <span>Batteriespeicher vorhanden</span>
+        <label class="switch">
+          <input type="checkbox" id="f-pv-bat" onchange="onToggle('f-pv-bat','s-pv-bat')">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div id="s-pv-bat" style="display:none;margin-top:8px">
+        <div class="form-group">
+          <label for="f-pv-kwh">Batteriekapazität (kWh)</label>
+          <input type="number" id="f-pv-kwh" step="0.1" min="0" placeholder="z. B. 10">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:8px">
+        <label for="f-pv-custom">Freier Zusatzpunkt</label>
+        <input type="text" id="f-pv-custom" placeholder="z. B. Balkonkraftwerk vorhanden …">
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🪟 Fenster & Verglasung</div>
+    <div class="form-group">
+      <label for="f-win-type">Verglasung</label>
+      <select id="f-win-type">
+        <option value="">– nicht relevant –</option>
+        <option value="W2">2-fach Verglasung</option>
+        <option value="W3">3-fach Verglasung</option>
+        <option value="W3P">3-fach Verglasung (Passivhaus)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-win-frame">Rahmenwerk</label>
+      <select id="f-win-frame">
+        <option value="">– nicht relevant –</option>
+        <option value="KST">Kunststoff</option>
+        <option value="HOLZ">Holz</option>
+        <option value="ALU">Aluminium</option>
+        <option value="HA">Holz-Aluminium</option>
+        <option value="ST">Stahl</option>
+      </select>
+    </div>
+    <div class="toggle-row">
+      <span>Sonnenschutz vorhanden</span>
+      <label class="switch">
+        <input type="checkbox" id="f-sun" onchange="onToggle('f-sun','s-sun')">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="s-sun" style="display:none;margin-top:8px">
+      <div class="form-group">
+        <label for="f-sun-type">Art des Sonnenschutzes</label>
+        <select id="f-sun-type">
+          <option value="JAL">Außenjalousie</option>
+          <option value="ROLL">Rolladen</option>
+          <option value="MARK">Markise</option>
+          <option value="INN">Innenliegender Sonnenschutz</option>
+          <option value="BVSH">Bauliche Verschattung</option>
+          <option value="GLAS">Sonnenschutzverglasung (g-Wert)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:8px">
+      <label for="f-windows-custom">Freier Zusatzpunkt</label>
+      <input type="text" id="f-windows-custom" placeholder="z. B. Haustür erneuert …">
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🧱 Wanddämmung</div>
+    <div class="toggle-row">
+      <span>Außenwanddämmung vorhanden</span>
+      <label class="switch">
+        <input type="checkbox" id="f-wall" onchange="onToggle('f-wall','s-wall')">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="s-wall" style="display:none;margin-top:8px">
+      <div class="form-group">
+        <label for="f-wall-type">Art der Wanddämmung</label>
+        <select id="f-wall-type">
+          <option value="WDVS_EPS">WDVS mit EPS (Polystyrol)</option>
+          <option value="WDVS_MW">WDVS mit Mineralwolle</option>
+          <option value="WDVS_HF">WDVS mit Holzfaserdämmplatte</option>
+          <option value="VHF">Vorgehängte hinterlüftete Fassade (VHF)</option>
+          <option value="KVH_MW">Holzrahmenbau, Gefach Mineralwolle</option>
+          <option value="KVH_HF">Holzrahmenbau, Gefach Holzfaser</option>
+          <option value="EINBLAS">Einblasdämmung (Kerndämmung)</option>
+          <option value="INNEN">Innendämmung</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-wall-cm">Dämmstärke (cm)</label>
+        <input type="number" id="f-wall-cm" min="1" max="80" placeholder="z. B. 16">
+      </div>
+      <div class="form-group">
+        <label for="f-wall-custom">Freier Zusatzpunkt</label>
+        <input type="text" id="f-wall-custom" placeholder="z. B. Sockelbereich separat gedämmt …">
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🏠 Dachdämmung</div>
+    <div class="toggle-row">
+      <span>Dachdämmung vorhanden</span>
+      <label class="switch">
+        <input type="checkbox" id="f-roof" onchange="onToggle('f-roof','s-roof')">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="s-roof" style="display:none;margin-top:8px">
+      <div class="form-group">
+        <label for="f-roof-type">Art der Dachdämmung</label>
+        <select id="f-roof-type">
+          <option value="AUF">Aufdachdämmung (Sarking)</option>
+          <option value="ZWISCH">Zwischensparrendämmung</option>
+          <option value="Z_U">Zwischen- + Untersparrendämmung</option>
+          <option value="Z_AUF">Zwischen- + Aufsparrendämmung (kombiniert)</option>
+          <option value="BODEN">Dachbodendämmung (oberste Geschossdecke)</option>
+          <option value="FLACH">Flachdach- / Terrassendämmung</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-roof-cm">Dämmstärke (cm)</label>
+        <input type="number" id="f-roof-cm" min="1" max="80" placeholder="z. B. 24">
+      </div>
+      <div class="form-group">
+        <label for="f-roof-custom">Freier Zusatzpunkt</label>
+        <input type="text" id="f-roof-custom" placeholder="z. B. Dachflächenfenster erneuert …">
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🏚️ Kellerdämmung</div>
+    <div class="toggle-row">
+      <span>Kellerdämmung vorhanden</span>
+      <label class="switch">
+        <input type="checkbox" id="f-base" onchange="onToggle('f-base','s-base')">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="s-base" style="display:none;margin-top:8px">
+      <div class="form-group">
+        <label for="f-base-type">Art der Kellerdämmung</label>
+        <select id="f-base-type">
+          <option value="PERIM">Perimeterdämmung (außen)</option>
+          <option value="KD_U">Kellerdecke unterseitig</option>
+          <option value="KD_O">Kellerdecke oberseitig (Fußboden EG)</option>
+          <option value="INNEN">Kellerwandinnendämmung</option>
+          <option value="KOMBI">Kombiniert (Perimeter + Decke)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-base-cm">Dämmstärke (cm)</label>
+        <input type="number" id="f-base-cm" min="1" max="40" placeholder="z. B. 12">
+      </div>
+      <div class="form-group">
+        <label for="f-base-custom">Freier Zusatzpunkt</label>
+        <input type="text" id="f-base-custom" placeholder="z. B. Bodenplatte gedämmt …">
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🌡️ Wärmebrücken</div>
+    <label>Wärmebrücken geprüft / nachgewiesen (Mehrfachauswahl)</label>
+    <div class="checkbox-list" id="f-wb-types" style="margin-top:8px">
+      <label class="checkbox-item"><input type="checkbox" value="FENSTER"><label>Fensterlaibungen / Stürze</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="DACH"><label>Dach- / Deckenanschlüsse</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="KELLER"><label>Keller- / Sockelanschlüsse</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="BALKON"><label>Balkone / Loggien (auskragende Bauteile)</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="ECKEN"><label>Gebäudeecken (Innen- und Außenecken)</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="ROLLADEN"><label>Rollladenkästen</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="STURZ"><label>Türsturz / Ringanker</label></label>
+      <label class="checkbox-item"><input type="checkbox" value="RING"><label>Ringbalken / Deckenauflager</label></label>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label for="f-wb-custom">Freier Zusatzpunkt</label>
+      <input type="text" id="f-wb-custom" placeholder="z. B. Hauseingang / Vordach …">
+    </div>
+  </div>
+
+  </div><!-- end s-bauabnahme-fields -->
+
+  <!-- iSFP-spezifische Felder ───────────────────────────────────────────── -->
+  <div id="s-isfp-fields" style="display:none">
+
+  <div class="form-section">
+    <div class="form-section-title">🏠 Gebäudesteckbrief</div>
+    <div class="form-group">
+      <label for="is-build-year">Baujahr des Gebäudes</label>
+      <input type="number" id="is-build-year" min="1800" max="2025" placeholder="z. B. 1972">
+    </div>
+    <div class="form-group">
+      <label for="is-build-type">Gebäudetyp</label>
+      <select id="is-build-type">
+        <option value="">– bitte wählen –</option>
+        <option value="EFH">Einfamilienhaus (EFH)</option>
+        <option value="ZFH">Zweifamilienhaus (ZFH)</option>
+        <option value="RH">Reihenhaus / Doppelhaushälfte</option>
+        <option value="MFH">Mehrfamilienhaus (MFH)</option>
+        <option value="WKDM">Wohn- und Geschäftshaus</option>
+        <option value="NBG">Nichtwohngebäude</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-living-area">Wohnfläche (m²)</label>
+      <input type="number" id="is-living-area" min="20" max="5000" placeholder="z. B. 145">
+    </div>
+    <div class="form-group">
+      <label for="is-floors">Anzahl Vollgeschosse</label>
+      <input type="number" id="is-floors" min="1" max="20" placeholder="z. B. 2">
+    </div>
+    <div class="toggle-row">
+      <span>Keller vorhanden (beheizt oder unbeheizt)</span>
+      <label class="switch"><input type="checkbox" id="is-has-cellar"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Dachgeschoss ausgebaut / bewohnt</span>
+      <label class="switch"><input type="checkbox" id="is-has-attic"><span class="slider"></span></label>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label for="is-monument">Denkmalschutz</label>
+      <select id="is-monument">
+        <option value="NEIN">Nein</option>
+        <option value="JA">Ja – Einzeldenkmal</option>
+        <option value="ENSEMBLE">Ja – Ensembleschutz</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🧱 Außenwand – Bestand</div>
+    <div class="form-group">
+      <label for="is-wall-const">Konstruktion / Wandaufbau</label>
+      <select id="is-wall-const">
+        <option value="">– bitte wählen –</option>
+        <option value="MASSIV_VBZ">Massiv – Vollziegel</option>
+        <option value="MASSIV_HLZ">Massiv – Hochlochziegel / Poroton</option>
+        <option value="MASSIV_KS">Massiv – Kalksandstein</option>
+        <option value="MASSIV_BET">Massiv – Beton / Stahlbeton</option>
+        <option value="MASSIV_PORBETON">Massiv – Porenbeton (Ytong o. ä.)</option>
+        <option value="ZWEISCHALE">Zweischaliges Mauerwerk (mit Kerndämmung)</option>
+        <option value="HRB">Holzrahmenbau / Holzständerbau</option>
+        <option value="FACHWERK">Fachwerkbau</option>
+        <option value="FERTIG">Fertighaus (Plattenbau / Tafelbau)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-wall-thickness">Wandstärke gesamt (cm)</label>
+      <input type="number" id="is-wall-thickness" min="10" max="100" placeholder="z. B. 36,5">
+    </div>
+    <div class="form-group">
+      <label for="is-wall-year">Baujahr / letzte Sanierung</label>
+      <input type="number" id="is-wall-year" min="1800" max="2025" placeholder="z. B. 1972">
+    </div>
+    <div class="form-group">
+      <label for="is-wall-ins">Vorhandene Dämmung (falls bekannt)</label>
+      <select id="is-wall-ins">
+        <option value="NEIN">Keine Dämmung</option>
+        <option value="WDVS">WDVS vorhanden</option>
+        <option value="VHF">VHF vorhanden</option>
+        <option value="KERN">Kerndämmung vorhanden</option>
+        <option value="INNEN">Innendämmung vorhanden</option>
+        <option value="UNBEKANNT">Unbekannt</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-wall-u">Geschätzter U-Wert Wand (W/m²K)</label>
+      <input type="number" id="is-wall-u" min="0.1" max="5" step="0.01" placeholder="z. B. 1.4">
+    </div>
+    <div class="form-group">
+      <label for="is-wall-condition">Zustand der Außenwand</label>
+      <select id="is-wall-condition">
+        <option value="GUT">Gut – kein Handlungsbedarf</option>
+        <option value="MITTEL">Mittel – Beobachtung empfohlen</option>
+        <option value="SCHLECHT">Schlecht – Sanierung erforderlich</option>
+        <option value="KRITISCH">Kritisch – sofortiger Handlungsbedarf</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-wall-notes">Bemerkungen Außenwand</label>
+      <textarea id="is-wall-notes" rows="2" placeholder="z. B. Feuchtigkeitsschäden im Sockelbereich…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🏠 Dach – Bestand</div>
+    <div class="form-group">
+      <label for="is-roof-type">Dachform</label>
+      <select id="is-roof-type">
+        <option value="">– bitte wählen –</option>
+        <option value="SATTEL">Satteldach</option>
+        <option value="WALM">Walmdach</option>
+        <option value="PULT">Pultdach</option>
+        <option value="FLACH">Flachdach</option>
+        <option value="MANSARD">Mansarddach</option>
+        <option value="VERSETZT">Versetztes Pultdach</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-roof-year">Baujahr Dach / letzte Sanierung</label>
+      <input type="number" id="is-roof-year" min="1800" max="2025" placeholder="z. B. 1972">
+    </div>
+    <div class="form-group">
+      <label for="is-roof-ins">Vorhandene Dachdämmung</label>
+      <select id="is-roof-ins">
+        <option value="NEIN">Keine Dämmung</option>
+        <option value="ZWISCHEN">Zwischensparren</option>
+        <option value="AUF">Aufsparren</option>
+        <option value="ZWISCHEN_AUF">Zwischen- + Aufsparren</option>
+        <option value="BODEN">Dachbodendämmung (OGD)</option>
+        <option value="FLACH_INS">Flachdachdämmung</option>
+        <option value="UNBEKANNT">Unbekannt</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-roof-u">Geschätzter U-Wert Dach (W/m²K)</label>
+      <input type="number" id="is-roof-u" min="0.1" max="5" step="0.01" placeholder="z. B. 0.8">
+    </div>
+    <div class="form-group">
+      <label for="is-roof-condition">Zustand des Dachs</label>
+      <select id="is-roof-condition">
+        <option value="GUT">Gut</option>
+        <option value="MITTEL">Mittel</option>
+        <option value="SCHLECHT">Schlecht – Sanierung erforderlich</option>
+        <option value="KRITISCH">Kritisch</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-roof-notes">Bemerkungen Dach</label>
+      <textarea id="is-roof-notes" rows="2" placeholder="z. B. Dacheindeckung in gutem Zustand, Gauben undicht…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🏚️ Keller / Bodenplatte – Bestand</div>
+    <div class="form-group">
+      <label for="is-base-type">Art der Gründung / Untergeschoss</label>
+      <select id="is-base-type">
+        <option value="">– bitte wählen –</option>
+        <option value="KELLER_UNB">Keller (unbeheizt)</option>
+        <option value="KELLER_BEH">Keller (beheizt)</option>
+        <option value="BODEN">Bodenplatte (kein Keller)</option>
+        <option value="KRIECH">Kriechkeller</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-base-ins">Vorhandene Dämmung</label>
+      <select id="is-base-ins">
+        <option value="NEIN">Keine Dämmung</option>
+        <option value="KD_U">Kellerdecke (unterseitig)</option>
+        <option value="KD_O">Kellerdecke (oberseitig / Fußboden)</option>
+        <option value="PERIM">Perimeterdämmung</option>
+        <option value="UNBEKANNT">Unbekannt</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-base-u">Geschätzter U-Wert Kellerdecke / Bodenplatte (W/m²K)</label>
+      <input type="number" id="is-base-u" min="0.1" max="5" step="0.01" placeholder="z. B. 1.2">
+    </div>
+    <div class="form-group">
+      <label for="is-base-condition">Zustand</label>
+      <select id="is-base-condition">
+        <option value="GUT">Gut</option>
+        <option value="MITTEL">Mittel</option>
+        <option value="SCHLECHT">Schlecht</option>
+        <option value="FEUCHT">Feuchteschäden vorhanden</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-base-notes">Bemerkungen Keller</label>
+      <textarea id="is-base-notes" rows="2" placeholder="z. B. Kelleraußenwände feucht, kein Außenputz…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🪟 Fenster &amp; Außentüren – Bestand</div>
+    <div class="form-group">
+      <label for="is-win-glazing">Verglasung (überwiegend)</label>
+      <select id="is-win-glazing">
+        <option value="">– bitte wählen –</option>
+        <option value="EINF">Einfachverglasung</option>
+        <option value="2F_ALT">2-fach Verglasung (alt, vor 1995)</option>
+        <option value="2F_NEU">2-fach Verglasung (neu, Wärmeschutz)</option>
+        <option value="3F">3-fach Verglasung</option>
+        <option value="GEMISCHT">Gemischt (verschiedene Baujahre)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-win-year">Baujahr Fenster (überwiegend)</label>
+      <input type="number" id="is-win-year" min="1950" max="2025" placeholder="z. B. 1995">
+    </div>
+    <div class="form-group">
+      <label for="is-win-u">Geschätzter Uw-Wert (W/m²K)</label>
+      <input type="number" id="is-win-u" min="0.5" max="6" step="0.1" placeholder="z. B. 2.8">
+    </div>
+    <div class="form-group">
+      <label for="is-win-condition">Zustand der Fenster</label>
+      <select id="is-win-condition">
+        <option value="GUT">Gut – kein Handlungsbedarf</option>
+        <option value="MITTEL">Mittel – Beobachtung</option>
+        <option value="SCHLECHT">Schlecht – Austausch empfohlen</option>
+        <option value="DRINGEND">Dringend – sofortiger Austausch</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-win-notes">Bemerkungen Fenster</label>
+      <textarea id="is-win-notes" rows="2" placeholder="z. B. Rollladenkästen undicht, Dichtungen defekt…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🔥 Wärmeerzeuger – Bestand</div>
+    <div class="form-group">
+      <label for="is-hg-type">Art des Wärmeerzeugers</label>
+      <select id="is-hg-type">
+        <option value="">– bitte wählen –</option>
+        <option value="GAS_NT">Gas-Niedertemperaturkessel</option>
+        <option value="GAS_BW">Gas-Brennwertkessel</option>
+        <option value="OEL_NT">Öl-Niedertemperaturkessel</option>
+        <option value="OEL_BW">Öl-Brennwertkessel</option>
+        <option value="WP_LUFT">Luftwärmepumpe</option>
+        <option value="WP_SOLE">Solewärmepumpe</option>
+        <option value="PELLET">Pelletkessel</option>
+        <option value="HOLZ">Stückholz / Holzvergaser</option>
+        <option value="FERN">Fernwärme</option>
+        <option value="BHKW">BHKW</option>
+        <option value="NACHTS">Nachtspeicherheizung</option>
+        <option value="DIREKT">Elektrische Direktheizung</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-hg-year">Baujahr Wärmeerzeuger</label>
+      <input type="number" id="is-hg-year" min="1950" max="2025" placeholder="z. B. 2003">
+    </div>
+    <div class="form-group">
+      <label for="is-hg-brand">Hersteller / Modell</label>
+      <input type="text" id="is-hg-brand" placeholder="z. B. Viessmann Vitodens 200">
+    </div>
+    <div class="form-group">
+      <label for="is-hg-power">Nennleistung (kW)</label>
+      <input type="number" id="is-hg-power" min="1" max="500" step="0.1" placeholder="z. B. 18">
+    </div>
+    <div class="form-group">
+      <label for="is-hg-condition">Zustand</label>
+      <select id="is-hg-condition">
+        <option value="GUT">Gut – weiter betreiben</option>
+        <option value="MITTEL">Mittel – Wartung empfohlen</option>
+        <option value="SCHLECHT">Schlecht – Austausch mittelfristig</option>
+        <option value="DRINGEND">Dringend – Austausch notwendig</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-hg-notes">Bemerkungen Wärmeerzeuger</label>
+      <textarea id="is-hg-notes" rows="2" placeholder="z. B. Kessel läuft, aber Wirkungsgrad gering…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">🚿 Warmwasserbereitung – Bestand</div>
+    <div class="form-group">
+      <label for="is-ww-type">Art der Warmwasserbereitung</label>
+      <select id="is-ww-type">
+        <option value="">– bitte wählen –</option>
+        <option value="ZENTRAL_KESSEL">Zentral über Heizkessel</option>
+        <option value="ZENTRAL_SOLAR">Zentral mit Solarthermie</option>
+        <option value="ZENTRAL_WP">Zentral über Wärmepumpe</option>
+        <option value="SPEICHER">Zentraler Speicher (elektrisch)</option>
+        <option value="DEZENTR_DLE">Dezentral – Durchlauferhitzer</option>
+        <option value="DEZENTR_KLEINSPEICHER">Dezentral – Kleinspeicher</option>
+        <option value="WAERMEPUMPENBOILER">Warmwasser-Wärmepumpe</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-ww-volume">Speichervolumen (Liter)</label>
+      <input type="number" id="is-ww-volume" min="20" max="5000" placeholder="z. B. 200">
+    </div>
+    <div class="form-group">
+      <label for="is-ww-year">Baujahr Warmwassersystem</label>
+      <input type="number" id="is-ww-year" min="1950" max="2025" placeholder="z. B. 2003">
+    </div>
+    <div class="form-group">
+      <label for="is-ww-notes">Bemerkungen Warmwasser</label>
+      <textarea id="is-ww-notes" rows="2" placeholder="z. B. Speicher schlecht gedämmt, Zirkulation unklar…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">♨️ Wärmeverteilung &amp; -abgabe – Bestand</div>
+    <div class="form-group">
+      <label for="is-dist-type">Art der Wärmeabgabe</label>
+      <select id="is-dist-type">
+        <option value="">– bitte wählen –</option>
+        <option value="HK">Heizkörper</option>
+        <option value="FBH">Fußbodenheizung</option>
+        <option value="GEMISCHT">Gemischt (HK + FBH)</option>
+        <option value="FC">Gebläsekonvektoren (Fan Coils)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-dist-vl">Vorlauftemperatur Auslegung (°C)</label>
+      <input type="number" id="is-dist-vl" min="25" max="90" placeholder="z. B. 70">
+    </div>
+    <div class="toggle-row">
+      <span>Hydraulischer Abgleich vorhanden</span>
+      <label class="switch"><input type="checkbox" id="is-dist-hyd"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Rohrleitungen gedämmt</span>
+      <label class="switch"><input type="checkbox" id="is-dist-pipe-ins"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px">
+      <span>Hocheffizienzpumpe vorhanden</span>
+      <label class="switch"><input type="checkbox" id="is-dist-hepu"><span class="slider"></span></label>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label for="is-dist-year">Baujahr Verteilsystem / letzte Sanierung</label>
+      <input type="number" id="is-dist-year" min="1950" max="2025" placeholder="z. B. 2003">
+    </div>
+    <div class="form-group">
+      <label for="is-dist-notes">Bemerkungen Wärmeverteilung</label>
+      <textarea id="is-dist-notes" rows="2" placeholder="z. B. Thermostatventile veraltet, kein Abgleich…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">💨 Lüftung – Bestand</div>
+    <div class="form-group">
+      <label for="is-vent-type">Art der Lüftung</label>
+      <select id="is-vent-type">
+        <option value="FENSTERLÜFT">Fensterlüftung (keine Anlage)</option>
+        <option value="ABL">Abluftanlage (ohne WRG)</option>
+        <option value="ZAL">Zentrale Lüftungsanlage mit WRG</option>
+        <option value="ERG_ZU">Einzelraumgeräte – Zu-/Abluft</option>
+        <option value="ERG_PP">Einzelraumgeräte – Push-Pull</option>
+        <option value="KLIMA">Klimaanlage / Split-Gerät</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-vent-year">Baujahr Lüftungsanlage</label>
+      <input type="number" id="is-vent-year" min="1980" max="2025" placeholder="z. B. 2010">
+    </div>
+    <div class="form-group">
+      <label for="is-vent-condition">Zustand</label>
+      <select id="is-vent-condition">
+        <option value="KEINE">Keine Anlage vorhanden</option>
+        <option value="GUT">Gut</option>
+        <option value="MITTEL">Mittel – Wartung empfohlen</option>
+        <option value="SCHLECHT">Schlecht – Austausch empfohlen</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-vent-notes">Bemerkungen Lüftung</label>
+      <textarea id="is-vent-notes" rows="2" placeholder="z. B. Dunstabzug ohne Rückluftbetrieb…"></textarea>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">⚡ Energieverbrauch</div>
+    <p style="font-size:13px;color:var(--outline);margin-bottom:12px">Verbrauchsdaten der letzten 1–3 Jahre (aus Heizkostenabrechnungen / Zählerständen)</p>
+    <div class="form-group">
+      <label for="is-energy-carrier">Hauptenergieträger</label>
+      <select id="is-energy-carrier">
+        <option value="GAS">Erdgas</option>
+        <option value="OEL">Heizöl</option>
+        <option value="STROM">Strom (Wärmepumpe / Direktheizung)</option>
+        <option value="PELLET">Holzpellets</option>
+        <option value="HOLZ">Stückholz / Hackschnitzel</option>
+        <option value="FERN">Fernwärme</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y1-label">Jahr 1 (aktuellstes)</label>
+      <input type="number" id="is-ev-y1-label" min="2015" max="2026" placeholder="z. B. 2024">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y1-heat">  Heizenergieverbrauch Jahr 1 (kWh oder Liter/m³)</label>
+      <input type="number" id="is-ev-y1-heat" min="0" placeholder="z. B. 18500">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y1-elec">  Stromverbrauch Jahr 1 (kWh)</label>
+      <input type="number" id="is-ev-y1-elec" min="0" placeholder="z. B. 3800">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y2-label">Jahr 2</label>
+      <input type="number" id="is-ev-y2-label" min="2015" max="2026" placeholder="z. B. 2023">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y2-heat">  Heizenergieverbrauch Jahr 2</label>
+      <input type="number" id="is-ev-y2-heat" min="0" placeholder="z. B. 19200">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y3-label">Jahr 3</label>
+      <input type="number" id="is-ev-y3-label" min="2015" max="2026" placeholder="z. B. 2022">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-y3-heat">  Heizenergieverbrauch Jahr 3</label>
+      <input type="number" id="is-ev-y3-heat" min="0" placeholder="z. B. 21000">
+    </div>
+    <div class="form-group">
+      <label for="is-ev-notes">Anmerkungen Verbrauch</label>
+      <textarea id="is-ev-notes" rows="2" placeholder="z. B. Leerstand im Sommer, PV vorhanden, Heizung getauscht…"></textarea>
+    </div>
+  </div>
+
+  </div><!-- end s-isfp-fields -->
+
+  <div style="height:32px"></div>
+</section>
+
+<!-- ── View: Checkliste ───────────────────────────────────────────────────── -->
+<section id="view-checklist" class="view">
+  <div id="cl-project-info" style="margin-bottom:12px;color:var(--outline)"></div>
+  <div class="card card-body" style="margin-bottom:16px">
+    <div class="progress-stats">
+      <span id="cl-progress-label" style="font-weight:600"></span>
+      <span style="color:var(--outline);font-size:13px">Tipp: Tippen für Details & Fotos</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="cl-progress-fill" style="width:0%"></div>
+    </div>
+  </div>
+  <div id="checklist-container"></div>
+  <div style="margin-top:4px;padding-bottom:16px">
+    <button class="btn btn-outline add-custom-btn" onclick="openAddCustomItem()">➕ Eigenen Punkt hinzufügen</button>
+  </div>
+</section>
+
+<!-- ── View: Prüfpunkt Detail ────────────────────────────────────────────── -->
+<section id="view-item-detail" class="view">
+  <div class="detail-header">
+    <div class="detail-category" id="det-category"></div>
+    <div class="detail-title"    id="det-title"></div>
+    <div class="detail-desc"     id="det-desc"></div>
+    <span class="badge" id="det-badge">⭐ Pflichtpunkt</span>
+  </div>
+
+  <div class="card card-body" style="margin-bottom:12px">
+    <div class="toggle-row">
+      <span style="font-size:16px;font-weight:600">Geprüft / Abgehakt</span>
+      <label class="switch">
+        <input type="checkbox" id="det-checked" onchange="onCheckedChange(this)">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="det-na-hint" style="display:none;margin-top:8px;padding:8px;background:var(--background);border-radius:8px;font-size:13px;color:var(--outline)">
+      ⊘ Dieser Prüfpunkt ist als <strong>nicht relevant</strong> markiert und wird im Fortschritt nicht gezählt.
+    </div>
+    <div style="margin-top:12px;border-top:1px solid #EEE;padding-top:12px">
+      <button id="det-na-btn" class="na-detail-btn" onclick="toggleNADetail()">⊘ Nicht relevant</button>
+    </div>
+  </div>
+
+  <div class="card card-body" style="margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-weight:600">Notizen</span>
+      <button id="voice-btn" class="voice-btn" onclick="startVoiceInput('det-notes')" title="Spracheingabe">🎤</button>
+    </div>
+    <div class="notes-area-wrap">
+      <textarea id="det-notes" rows="4" placeholder="Notiz eingeben oder Mikrofon nutzen…" onchange="onNotesChange(this)" oninput="onNotesChange(this)"></textarea>
+    </div>
+  </div>
+
+  <div class="card card-body">
+    <div style="font-weight:600;margin-bottom:10px">Fotos</div>
+    <div class="photo-grid" id="photo-grid"></div>
+    <p style="font-size:12px;color:var(--outline);margin-top:10px">
+      📷 Foto-Symbol antippen → Kamera öffnet sich. Direkt nach dem Aufnehmen kann eine Beschreibung eingegeben werden.
+    </p>
+  </div>
+
+  <div style="height:32px"></div>
+</section>
+
+<!-- ── View: Bericht ─────────────────────────────────────────────────────── -->
+<section id="view-report" class="view">
+  <div class="card card-body" style="margin-bottom:16px">
+    <div style="font-weight:700;font-size:15px;margin-bottom:12px">Projektzusammenfassung</div>
+    <div class="info-row"><span class="info-label">Projekt:</span>       <span class="info-value" id="rep-name"></span></div>
+    <div class="info-row"><span class="info-label">Kunde:</span>         <span class="info-value" id="rep-customer"></span></div>
+    <div class="info-row"><span class="info-label">Adresse:</span>       <span class="info-value" id="rep-address"></span></div>
+    <div class="info-row"><span class="info-label">Datum:</span>         <span class="info-value" id="rep-date"></span></div>
+    <div class="info-row" id="rep-participants-row" style="display:none">
+      <span class="info-label">Teilnehmer:</span>
+      <span class="info-value" id="rep-participants" style="white-space:pre-wrap"></span>
+    </div>
+    <div class="info-row"><span class="info-label">Projektart:</span>    <span class="info-value" id="rep-funding"></span></div>
+    <div class="info-row" id="rep-kfw-row"><span class="info-label">Stufe / Programm:</span> <span class="info-value" id="rep-kfw"></span></div>
+  </div>
+
+  <div class="card card-body" style="margin-bottom:16px">
+    <div style="font-weight:700;font-size:15px;margin-bottom:10px">Begehungsfortschritt</div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-num" id="rep-total">0</div><div class="stat-label">Gesamt</div></div>
+      <div class="stat-box"><div class="stat-num stat-checked" id="rep-checked">0</div><div class="stat-label">Geprüft</div></div>
+      <div class="stat-box"><div class="stat-num stat-open" id="rep-open">0</div><div class="stat-label">Offen</div></div>
+      <div class="stat-box"><div class="stat-num stat-photos" id="rep-photos">0</div><div class="stat-label">Fotos</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px">
+      <span>Fortschritt</span><span id="rep-pct" style="font-weight:700"></span>
+    </div>
+    <div class="progress-bar-track"><div class="progress-bar-fill" id="rep-fill" style="width:0%"></div></div>
+    <div id="rep-na-row" class="info-row" style="display:none;margin-top:8px">
+      <span class="info-label">Nicht relevant:</span>
+      <span class="info-value" id="rep-na" style="color:var(--outline)">0</span>
+      <span style="font-size:12px;color:var(--outline)">(aus Bericht ausgeblendet)</span>
+    </div>
+  </div>
+
+  <div style="font-weight:700;margin-bottom:12px">Export</div>
+
+  <div class="card card-body" style="margin-bottom:12px">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+      <span style="font-size:24px">📄</span>
+      <div>
+        <div style="font-weight:600">PDF-Bericht</div>
+        <div style="font-size:12px;color:var(--outline)">Vollständiger Bericht mit Checkliste, Notizen und Fotos</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="generatePdf()">📥 PDF erstellen & laden</button>
+      <button class="btn btn-outline" onclick="sendEmail()">📧 Per E-Mail</button>
+    </div>
+  </div>
+
+  <div class="card card-body" style="margin-bottom:12px">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+      <span style="font-size:24px">📊</span>
+      <div>
+        <div style="font-weight:600">CSV / Excel</div>
+        <div style="font-size:12px;color:var(--outline)">Tabellarische Auswertung aller Prüfpunkte</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="exportCsv()">📥 CSV herunterladen</button>
+    </div>
+  </div>
+
+  <div style="height:32px"></div>
+</section>
+
+<!-- ── View: Grundrissplan ───────────────────────────────────────────────── -->
+<section id="view-floor-plan" class="view">
+  <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <label class="btn btn-outline" style="font-size:13px;padding:8px 14px;cursor:pointer">
+      📂 Grundriss laden (PDF/Bild)
+      <input type="file" id="floor-plan-input" accept="image/*,.pdf" style="display:none" onchange="onFloorPlanFile(this)">
+    </label>
+    <button class="btn btn-outline" style="font-size:13px;padding:8px 14px" onclick="addFloorPlanPin()" id="btn-add-pin" disabled>📍 Pin setzen</button>
+    <button class="btn btn-outline" style="font-size:13px;padding:8px 14px" onclick="deleteFloorPlan()" id="btn-del-plan" style="display:none">🗑️ Plan löschen</button>
+  </div>
+
+  <!-- Grundriss-Auswahl (falls mehrere) -->
+  <div id="fp-plan-tabs" style="display:none;margin-bottom:8px;overflow-x:auto;white-space:nowrap"></div>
+
+  <!-- Canvas-Bereich -->
+  <div id="fp-canvas-wrap" style="position:relative;background:#F5F5F5;border-radius:12px;overflow:hidden;min-height:200px;touch-action:none">
+    <div id="fp-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 16px;color:var(--outline);text-align:center">
+      <span style="font-size:48px;margin-bottom:12px">🗺️</span>
+      <div style="font-weight:600;margin-bottom:4px">Kein Grundriss geladen</div>
+      <div style="font-size:13px">PDF oder Bild oben auswählen</div>
+    </div>
+    <canvas id="fp-canvas" style="display:none;width:100%;height:auto;touch-action:none"></canvas>
+    <div id="fp-pins"></div>
+  </div>
+
+  <!-- Pin-Liste -->
+  <div id="fp-pin-list" style="margin-top:16px"></div>
+
+  <div style="height:32px"></div>
+</section>
+
+</main>
+
+<!-- ══ Foto-Modal ══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="photo-modal" onclick="if(event.target===this)closeModal('photo-modal')">
+  <div class="modal">
+    <h3>Foto</h3>
+    <img id="modal-photo-img" src="" alt="" style="width:100%;border-radius:8px;margin-bottom:12px;max-height:300px;object-fit:contain">
+    <input type="hidden" id="modal-photo-id">
+    <div class="form-group">
+      <label>Beschreibung</label>
+      <input type="text" id="modal-photo-desc" placeholder="Kurze Beschreibung…">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('photo-modal')">Abbrechen</button>
+      <button class="btn btn-primary" onclick="savePhotoDesc()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Eigener-Punkt Modal ══════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="custom-item-modal" onclick="if(event.target===this)closeModal('custom-item-modal')">
+  <div class="modal">
+    <h3>Eigenen Punkt hinzufügen</h3>
+    <div class="form-group">
+      <label for="custom-category">Kategorie</label>
+      <select id="custom-category"></select>
+    </div>
+    <div class="form-group">
+      <label for="custom-title">Titel *</label>
+      <input type="text" id="custom-title" placeholder="Bezeichnung des Prüfpunkts">
+    </div>
+    <div class="form-group">
+      <label for="custom-desc">Beschreibung / Bemerkung</label>
+      <textarea id="custom-desc" rows="3" placeholder="Optionale Beschreibung oder Bemerkung…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('custom-item-modal')">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveCustomItem()">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Pin-Modal ══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="pin-modal" onclick="if(event.target===this)closeModal('pin-modal')">
+  <div class="modal">
+    <h3 id="pin-modal-title">📍 Pin</h3>
+    <input type="hidden" id="pin-modal-id">
+    <div class="form-group">
+      <label for="pin-modal-label">Bezeichnung / Bauteil</label>
+      <input type="text" id="pin-modal-label" placeholder="z. B. Wohnzimmer-Fenster West">
+    </div>
+    <div class="form-group">
+      <label for="pin-modal-desc">Beschreibung / Befund</label>
+      <textarea id="pin-modal-desc" rows="3" placeholder="Befund, Maß, Besonderheit…"></textarea>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:8px;font-size:14px">Fotos zu diesem Pin</div>
+      <div id="pin-modal-photos" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <label class="btn btn-outline" style="font-size:13px;padding:6px 12px;cursor:pointer">
+        📷 Foto aufnehmen
+        <input type="file" id="pin-photo-input" accept="image/*" capture="environment" style="display:none" onchange="onPinPhoto(this)">
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="deletePinModal()">🗑️ Löschen</button>
+      <button class="btn btn-outline" onclick="closeModal('pin-modal')">Abbrechen</button>
+      <button class="btn btn-primary" onclick="savePinModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Scripts ════════════════════════════════════════════════════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"
+        onerror="console.warn('jsPDF offline nicht verfügbar')"></script>
+<script>
+  // pdf.js worker konfigurieren
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  }
+</script>
+<script src="checklist-gen.js"></script>
+<script src="supabase.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

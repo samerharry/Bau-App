@@ -1,0 +1,12 @@
+{
+  "name": "Bauabnahme",
+  "short_name": "Bauabnahme",
+  "description": "Bauabnahmen und Begehungen für Energieberater",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#2E7D32",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
