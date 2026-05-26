@@ -3,6 +3,7 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 let currentProjectId  = null;
 let currentItemId     = null;
+let originalProjectType = 'BAUABNAHME'; // beim Laden des Formulars gesetzt
 let currentItem       = null;
 let cachedProject     = null;
 let cachedItems       = [];
@@ -158,6 +159,7 @@ function resetProjectForm() {
   document.getElementById('f-date').value         = '';
   document.getElementById('f-participants').value = '';
   document.getElementById('f-project-type').value = 'BAUABNAHME';
+  originalProjectType = 'BAUABNAHME';
   onProjectTypeChange();
   document.getElementById('f-funding').value      = 'KFW_NEUBAU';
   onFundingChange();
@@ -225,6 +227,7 @@ function fillProjectForm(p) {
   // Projekttyp wiederherstellen
   const pt = bd.projectType || 'BAUABNAHME';
   document.getElementById('f-project-type').value = pt;
+  originalProjectType = pt;   // Ausgangswert merken für Änderungserkennung
   onProjectTypeChange();
 
   // iSFP-Felder befüllen (falls vorhanden)
@@ -464,7 +467,7 @@ async function saveProject() {
       toast(`${generated.length} Prüfpunkte generiert`);
     } else {
       // Prüfen ob Projekttyp geändert wurde → Checkliste neu generieren
-      const oldType = cachedProject?.buildingData?.projectType || 'BAUABNAHME';
+      const oldType = originalProjectType;
       const newType = bd.projectType || 'BAUABNAHME';
       if (oldType !== newType) {
         const ok = confirm(
@@ -630,8 +633,11 @@ async function renderPhotos(itemId) {
       ${photo.description ? `<div class="photo-caption">${esc(photo.description)}</div>` : ''}
       <button class="photo-delete" onclick="event.stopPropagation();deletePhoto('${photo.id}')" title="Löschen">×</button>
     </div>`).join('') +
-    `<div class="photo-add-btn" onclick="document.getElementById('photo-input').click()">
-      📷<span class="photo-add-label">Foto</span>
+    `<div class="photo-add-btn" onclick="document.getElementById('photo-input-camera').click()" title="Kamera">
+      📷<span class="photo-add-label">Kamera</span>
+    </div>` +
+    `<div class="photo-add-btn" onclick="document.getElementById('photo-input-gallery').click()" title="Galerie">
+      🖼️<span class="photo-add-label">Galerie</span>
     </div>`;
 }
 
@@ -1026,8 +1032,8 @@ function fileToDataUrl(file) {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Foto-Aufnahme
-  document.getElementById('photo-input').addEventListener('change', async (e) => {
+  // Foto-Aufnahme (Kamera + Galerie – gleicher Handler)
+  async function handlePhotoInput(e) {
     const file = e.target.files[0];
     if (!file || currentItemId === null) return;
     const itemId = currentItemId;   // lokale Kopie, bevor async-Kette startet
@@ -1046,7 +1052,9 @@ document.addEventListener('DOMContentLoaded', () => {
       toast('Fehler beim Speichern: ' + err.message);
       e.target.value = '';
     }
-  });
+  }
+  document.getElementById('photo-input-camera').addEventListener('change',  handlePhotoInput);
+  document.getElementById('photo-input-gallery').addEventListener('change', handlePhotoInput);
 
   // Auth-Zustand beobachten
   // sessionActive-Flag verhindert Navigation bei Token-Refresh / Kamera-Rückkehr
