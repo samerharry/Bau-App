@@ -130,7 +130,15 @@ const Photos = {
   },
   async listForItems(itemIds) {
     if (!itemIds.length) return [];
-    return chk(await sb.from('photos').select('*').in('checklist_item_id', itemIds)).map(rowToPhoto);
+    // In Batches à 10 aufteilen – vermeidet Supabase Statement-Timeout bei vielen Items
+    const BATCH = 10;
+    const results = [];
+    for (let i = 0; i < itemIds.length; i += BATCH) {
+      const chunk = itemIds.slice(i, i + BATCH);
+      const rows  = chk(await sb.from('photos').select('*').in('checklist_item_id', chunk));
+      results.push(...rows.map(rowToPhoto));
+    }
+    return results;
   },
   async save(photo) {
     const uid = await getUid();

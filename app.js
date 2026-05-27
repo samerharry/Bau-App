@@ -774,55 +774,63 @@ async function openReport(projectId) {
   }
   if (!cachedProject) { toast('Projekt nicht gefunden'); return; }
 
-  const project  = cachedProject;
-  const bd       = project.buildingData || {};
-  const allItems = cachedItems;
-  const items    = allItems.filter(i => !i.isNotApplicable);
-  const photos   = await SB.Photos.listForItems(items.map(i => i.id));
-  const checked  = items.filter(i => i.isChecked).length;
-  const naCount  = allItems.length - items.length;
-  const pct      = items.length ? Math.round(checked / items.length * 100) : 0;
+  try {
+    const project  = cachedProject;
+    const bd       = project.buildingData || {};
+    const allItems = cachedItems;
+    const items    = allItems.filter(i => !i.isNotApplicable);
+    const photos   = await SB.Photos.listForItems(items.map(i => i.id));
+    const checked  = items.filter(i => i.isChecked).length;
+    const naCount  = allItems.length - items.length;
+    const pct      = items.length ? Math.round(checked / items.length * 100) : 0;
 
-  document.getElementById('rep-name').textContent     = project.name;
-  document.getElementById('rep-customer').textContent = project.customer;
-  document.getElementById('rep-address').textContent  = project.address || '–';
-  document.getElementById('rep-date').textContent     = project.inspectionDate
-    ? new Date(project.inspectionDate).toLocaleDateString('de-DE') : '–';
+    console.log('[Report] DOM update – items:', items.length, 'checked:', checked, 'photos:', photos.length);
 
-  const participants = bd.participants || '';
-  document.getElementById('rep-participants').textContent          = participants;
-  document.getElementById('rep-participants-row').style.display    = participants ? 'flex' : 'none';
+    document.getElementById('rep-name').textContent     = project.name     || '–';
+    document.getElementById('rep-customer').textContent = project.customer  || '–';
+    document.getElementById('rep-address').textContent  = project.address   || '–';
+    document.getElementById('rep-date').textContent     = project.inspectionDate
+      ? new Date(project.inspectionDate).toLocaleDateString('de-DE') : '–';
 
-  document.getElementById('rep-funding').textContent =
-    bd.projectType === 'ISFP'
-      ? 'iSFP – Bestandsaufnahme'
-      : (window.ENUMS.FUNDING_TYPE[bd.fundingType] || bd.fundingType || '–');
+    const participants = bd.participants || '';
+    document.getElementById('rep-participants').textContent       = participants;
+    document.getElementById('rep-participants-row').style.display = participants ? 'flex' : 'none';
 
-  let kfwDetail = '';
-  const ft = bd.fundingType;
-  if (ft === 'KFW_NEUBAU') {
-    kfwDetail = window.ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
-  } else if (ft === 'KFW_SANIERUNG' || ft === 'KFW') {
-    kfwDetail = window.ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '–';
-    if (bd.kfwClass === 'EE') kfwDetail += ' + EE-Klasse';
-    if (bd.kfwClass === 'NH') kfwDetail += ' + NH-Klasse';
-  } else if (ft === 'KFW_HEIZUNG') {
-    kfwDetail = window.ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '–';
-  } else if (ft === 'BAFA') {
-    kfwDetail = (bd.bafaMeasures || []).map(m => window.ENUMS.BAFA_MEASURE?.[m] || m).join(', ') || '–';
+    const ENUMS = window.ENUMS || {};
+    document.getElementById('rep-funding').textContent =
+      bd.projectType === 'ISFP'
+        ? 'iSFP – Bestandsaufnahme'
+        : (ENUMS.FUNDING_TYPE?.[bd.fundingType] || bd.fundingType || '–');
+
+    let kfwDetail = '';
+    const ft = bd.fundingType;
+    if (ft === 'KFW_NEUBAU') {
+      kfwDetail = ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
+    } else if (ft === 'KFW_SANIERUNG' || ft === 'KFW') {
+      kfwDetail = ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '–';
+      if (bd.kfwClass === 'EE') kfwDetail += ' + EE-Klasse';
+      if (bd.kfwClass === 'NH') kfwDetail += ' + NH-Klasse';
+    } else if (ft === 'KFW_HEIZUNG') {
+      kfwDetail = ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '–';
+    } else if (ft === 'BAFA') {
+      kfwDetail = (bd.bafaMeasures || []).map(m => ENUMS.BAFA_MEASURE?.[m] || m).join(', ') || '–';
+    }
+    document.getElementById('rep-kfw').textContent       = kfwDetail || '–';
+    document.getElementById('rep-kfw-row').style.display = ft ? 'flex' : 'none';
+
+    document.getElementById('rep-total').textContent    = items.length;
+    document.getElementById('rep-checked').textContent  = checked;
+    document.getElementById('rep-open').textContent     = items.length - checked;
+    document.getElementById('rep-photos').textContent   = photos.length;
+    document.getElementById('rep-pct').textContent      = pct + '%';
+    document.getElementById('rep-fill').style.width     = pct + '%';
+    document.getElementById('rep-na').textContent       = naCount;
+    document.getElementById('rep-na-row').style.display = naCount > 0 ? 'flex' : 'none';
+
+  } catch (err) {
+    console.error('[Report] Fehler beim Rendern:', err);
+    alert('Bericht-Fehler: ' + err.message);
   }
-  document.getElementById('rep-kfw').textContent      = kfwDetail || '–';
-  // Zeile immer einblenden wenn ein Förderprogramm gewählt ist
-  document.getElementById('rep-kfw-row').style.display = ft ? 'flex' : 'none';
-
-  document.getElementById('rep-total').textContent    = items.length;
-  document.getElementById('rep-checked').textContent  = checked;
-  document.getElementById('rep-open').textContent     = items.length - checked;
-  document.getElementById('rep-photos').textContent   = photos.length;
-  document.getElementById('rep-pct').textContent      = pct + '%';
-  document.getElementById('rep-fill').style.width     = pct + '%';
-  document.getElementById('rep-na').textContent       = naCount;
-  document.getElementById('rep-na-row').style.display = naCount > 0 ? 'flex' : 'none';
 }
 
 async function generatePdf() {
@@ -1052,7 +1060,9 @@ function fileToDataUrl(file) {
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+const APP_VERSION = '2.1';
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('App Version:', APP_VERSION);
   // Foto-Aufnahme (Kamera + Galerie – gleicher Handler)
   async function handlePhotoInput(e) {
     const file = e.target.files[0];
