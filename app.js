@@ -21,8 +21,10 @@ let currentPinId      = null; // Pin im Modal
 const views = ['login','projects','project-home','project-edit','checklist','item-detail','report','floor-plan'];
 
 function showView(name, title, showBack = true) {
-  views.forEach(v => document.getElementById('view-' + v).classList.remove('active'));
-  document.getElementById('view-' + name).classList.add('active');
+  views.forEach(v => { const el = document.getElementById('view-' + v); if (el) el.classList.remove('active'); });
+  const target = document.getElementById('view-' + name);
+  if (!target) { console.error('View nicht gefunden:', name); return; }
+  target.classList.add('active');
   document.getElementById('header-title').textContent = title;
   document.getElementById('btn-back').style.display      = showBack ? 'flex' : 'none';
   document.getElementById('fab').classList.toggle('hidden', name !== 'projects');
@@ -102,10 +104,17 @@ async function openProjectList() {
   await renderProjectList();
 }
 
-async function openProjectHome(projectId) {
+async function openProjectHome(projectId, projectName) {
   currentProjectId = projectId;
   currentItemId = null; currentItem = null;
-  // Projekt laden (aus Cache oder DB)
+
+  // View SOFORT anzeigen (kein await davor!)
+  showView('project-home', projectName || 'Projekt');
+  document.getElementById('ph-project-name').textContent = '';
+  document.getElementById('ph-checklist-stat').textContent = 'Lädt…';
+  document.getElementById('ph-floorplan-stat').textContent = 'Lädt…';
+
+  // Projektdaten laden (async im Hintergrund)
   if (!cachedProject || cachedProject.id !== projectId) {
     try {
       const projects = await SB.Projects.list();
@@ -113,9 +122,12 @@ async function openProjectHome(projectId) {
     } catch(e) { toast('Fehler: ' + e.message); return; }
   }
   if (!cachedProject) return;
-  showView('project-home', cachedProject.name);
+
+  // Titel + Untertitel nachträglich befüllen
+  document.getElementById('header-title').textContent = cachedProject.name;
   document.getElementById('ph-project-name').textContent =
     cachedProject.customer + (cachedProject.address ? '  ·  ' + cachedProject.address : '');
+
   // Prüfpunkte-Statistik
   try {
     if (!cachedItems.length) cachedItems = await SB.Items.list(projectId);
@@ -124,13 +136,14 @@ async function openProjectHome(projectId) {
     const pct     = active.length ? Math.round(checked / active.length * 100) : 0;
     document.getElementById('ph-checklist-stat').textContent =
       `${checked} / ${active.length} geprüft (${pct}%)`;
-  } catch { /* stat bleibt leer */ }
+  } catch { document.getElementById('ph-checklist-stat').textContent = 'Checkliste öffnen'; }
+
   // Grundriss-Statistik
   try {
     const plans = await SB.FloorPlans.list(projectId);
     document.getElementById('ph-floorplan-stat').textContent =
       plans.length ? `${plans.length} Plan${plans.length > 1 ? 'pläne' : ''} vorhanden` : 'Noch keine Pläne';
-  } catch { /* */ }
+  } catch { document.getElementById('ph-floorplan-stat').textContent = 'Pläne und Markierungen'; }
 }
 
 async function renderProjectList() {
@@ -153,7 +166,7 @@ async function renderProjectList() {
       const ft   = p.buildingData?.fundingType || '';
       const chip = pt === 'ISFP' ? 'iSFP Bestandsaufnahme' : (chipLabel[ft] || ft);
       const date = p.inspectionDate ? new Date(p.inspectionDate).toLocaleDateString('de-DE') : '';
-      return `<div class="project-card" onclick="openProjectHome('${p.id}')">`
+      return `<div class="project-card" onclick="openProjectHome('${p.id}')">
         <div class="project-card-accent"></div>
         <div class="project-card-body">
           <div class="project-card-name">${esc(p.name)}</div>
