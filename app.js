@@ -797,19 +797,20 @@ async function openReport(projectId) {
 
   let kfwDetail = '';
   const ft = bd.fundingType;
-  if (ft === 'KFW_NEUBAU' && bd.kfwLevel) {
-    kfwDetail = window.ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel;
-  } else if ((ft === 'KFW_SANIERUNG' || ft === 'KFW') && bd.kfwLevel) {
-    kfwDetail = window.ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel;
+  if (ft === 'KFW_NEUBAU') {
+    kfwDetail = window.ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
+  } else if (ft === 'KFW_SANIERUNG' || ft === 'KFW') {
+    kfwDetail = window.ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '–';
     if (bd.kfwClass === 'EE') kfwDetail += ' + EE-Klasse';
     if (bd.kfwClass === 'NH') kfwDetail += ' + NH-Klasse';
-  } else if (ft === 'KFW_HEIZUNG' && bd.heizungType) {
-    kfwDetail = window.ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType;
+  } else if (ft === 'KFW_HEIZUNG') {
+    kfwDetail = window.ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '–';
   } else if (ft === 'BAFA') {
     kfwDetail = (bd.bafaMeasures || []).map(m => window.ENUMS.BAFA_MEASURE?.[m] || m).join(', ') || '–';
   }
   document.getElementById('rep-kfw').textContent      = kfwDetail || '–';
-  document.getElementById('rep-kfw-row').style.display = kfwDetail ? 'flex' : 'none';
+  // Zeile immer einblenden wenn ein Förderprogramm gewählt ist
+  document.getElementById('rep-kfw-row').style.display = ft ? 'flex' : 'none';
 
   document.getElementById('rep-total').textContent    = items.length;
   document.getElementById('rep-checked').textContent  = checked;
@@ -822,13 +823,18 @@ async function openReport(projectId) {
 }
 
 async function generatePdf() {
-  if (!window.jspdf) { toast('PDF-Bibliothek nicht geladen – bitte Seite neu laden'); return; }
+  if (!window.jspdf) {
+    alert('PDF-Bibliothek konnte nicht geladen werden.\n\nBitte prüfen Sie Ihre Internetverbindung und laden Sie die Seite neu (Strg+R / Browser-Reload).');
+    return;
+  }
   if (!cachedProject) { toast('Bitte zuerst ein Projekt öffnen'); return; }
 
   const project = cachedProject;
   const bd      = project.buildingData || {};
   const items   = cachedItems.filter(i => !i.isNotApplicable);
   const photos  = await SB.Photos.listForItems(items.map(i => i.id));
+
+  try {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
   const PW = 210, MARGIN = 15, CW = PW - 2 * MARGIN;
@@ -857,22 +863,23 @@ async function generatePdf() {
   }
   const ftLabel = window.ENUMS.FUNDING_TYPE?.[bd.fundingType] || bd.fundingType || '';
   let levelLabel = '';
-  if (bd.fundingType === 'KFW_NEUBAU' && bd.kfwLevel)
-    levelLabel = window.ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel;
-  else if ((bd.fundingType === 'KFW_SANIERUNG' || bd.fundingType === 'KFW') && bd.kfwLevel) {
-    levelLabel = window.ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel;
+  if (bd.fundingType === 'KFW_NEUBAU') {
+    levelLabel = window.ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
+  } else if (bd.fundingType === 'KFW_SANIERUNG' || bd.fundingType === 'KFW') {
+    levelLabel = window.ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '';
     if (bd.kfwClass === 'EE') levelLabel += ' + EE-Klasse';
     if (bd.kfwClass === 'NH') levelLabel += ' + NH-Klasse';
-  } else if (bd.fundingType === 'KFW_HEIZUNG' && bd.heizungType)
-    levelLabel = window.ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType;
-  doc.text(`Projektart: ${ftLabel}${levelLabel ? ' – ' + levelLabel : ''}`, MARGIN, y); y += 5;
+  } else if (bd.fundingType === 'KFW_HEIZUNG') {
+    levelLabel = window.ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '';
+  }
+  doc.text(`Projektart: ${ftLabel}${levelLabel ? ' - ' + levelLabel : ''}`, MARGIN, y); y += 5;
   doc.setTextColor(0, 0, 0);
 
   const checked = items.filter(i => i.isChecked).length;
   const pct = items.length ? checked / items.length : 0;
   y += 4;
   doc.setFontSize(11); doc.setFont(undefined, 'bold');
-  doc.text(`Fortschritt: ${checked} / ${items.length} geprüft (${Math.round(pct*100)}%)`, MARGIN, y); y += 4;
+  doc.text(`Fortschritt: ${checked} / ${items.length} geprueft (${Math.round(pct*100)}%)`, MARGIN, y); y += 4;
   doc.setFillColor(220,220,220); doc.rect(MARGIN, y, CW, 5, 'F');
   doc.setFillColor(76,175,80);   doc.rect(MARGIN, y, CW*pct, 5, 'F');
   y += 12;
@@ -893,7 +900,8 @@ async function generatePdf() {
     for (const item of catItems) {
       if (y > 265) { doc.addPage(); y = 20; }
       doc.setFontSize(9); doc.setFont(undefined, 'normal');
-      const mark = item.isChecked ? '☑' : '☐';
+      // ASCII-Zeichen statt Unicode (jsPDF Standard-Font)
+      const mark = item.isChecked ? '[OK]' : '[  ]';
       const customMark = item.isCustom ? ' [eigener Punkt]' : '';
       const lines = doc.splitTextToSize(`${mark} ${item.title}${item.isMandatory?' *':''}${customMark}`, CW-6);
       doc.setTextColor(item.isChecked ? 120 : 0, item.isChecked ? 120 : 0, item.isChecked ? 120 : 0);
@@ -905,7 +913,8 @@ async function generatePdf() {
       }
       if (item.notes) {
         doc.setFontSize(8); doc.setTextColor(46,125,50);
-        doc.text('📝 ' + item.notes, MARGIN+6, y); y += 4;
+        const nl = doc.splitTextToSize('Notiz: ' + item.notes, CW-10);
+        doc.text(nl, MARGIN+6, y); y += nl.length * 4;
       }
       const itemPhotos = photos.filter(p => p.checklistItemId === item.id);
       if (itemPhotos.length) {
@@ -928,22 +937,19 @@ async function generatePdf() {
     y += 3;
   }
   const filename = `Bauabnahme_${project.name.replace(/[^a-zA-Z0-9]/g,'_')}_${Date.now()}.pdf`;
-  try {
-    // Blob-Download (funktioniert zuverlässig auf Android + Desktop)
-    const blob = doc.output('blob');
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
-    toast('PDF wird heruntergeladen…');
-  } catch {
-    // Fallback: neues Tab öffnen
-    const dataUri = doc.output('datauristring');
-    window.open(dataUri, '_blank');
-    toast('PDF in neuem Tab geöffnet');
+  const blob = doc.output('blob');
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+  toast('PDF wird heruntergeladen…');
+
+  } catch (err) {
+    alert('PDF-Fehler: ' + err.message + '\n\nBitte melden Sie diesen Fehler.');
+    console.error('PDF generation error:', err);
   }
 }
 

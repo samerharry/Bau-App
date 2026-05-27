@@ -1182,9 +1182,9 @@
 </div>
 
 <!-- ══ Scripts ════════════════════════════════════════════════════════════ -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
-        crossorigin="anonymous" referrerpolicy="no-referrer"
-        onerror="console.warn('jsPDF offline nicht verfügbar')"></script>
+<!-- jsPDF: primärer CDN (jsdelivr), Fallback (cdnjs) -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+        onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'"></script>
 <script>
   // pdf.js worker konfigurieren
   if (typeof pdfjsLib !== 'undefined') {
