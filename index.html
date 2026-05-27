@@ -942,6 +942,50 @@
   <div style="height:32px"></div>
 </section>
 
+<!-- ── View: Projektstartseite ──────────────────────────────────────────── -->
+<section id="view-project-home" class="view">
+  <div id="ph-project-name" style="font-size:13px;color:var(--outline);margin-bottom:20px;text-align:center"></div>
+  <div style="display:flex;flex-direction:column;gap:14px">
+
+    <div class="project-home-tile" onclick="editProject(currentProjectId)">
+      <div class="ph-tile-icon">📋</div>
+      <div class="ph-tile-body">
+        <div class="ph-tile-title">Stammdaten</div>
+        <div class="ph-tile-sub">Projektdaten &amp; Gebäudedaten bearbeiten</div>
+      </div>
+      <div class="ph-tile-arrow">›</div>
+    </div>
+
+    <div class="project-home-tile" onclick="openChecklist(currentProjectId)">
+      <div class="ph-tile-icon">✅</div>
+      <div class="ph-tile-body">
+        <div class="ph-tile-title">Prüfpunkte</div>
+        <div class="ph-tile-sub" id="ph-checklist-stat">Checkliste öffnen</div>
+      </div>
+      <div class="ph-tile-arrow">›</div>
+    </div>
+
+    <div class="project-home-tile" onclick="openFloorPlan()">
+      <div class="ph-tile-icon">🗺️</div>
+      <div class="ph-tile-body">
+        <div class="ph-tile-title">Grundrisse &amp; Pins</div>
+        <div class="ph-tile-sub" id="ph-floorplan-stat">Pläne und Markierungen</div>
+      </div>
+      <div class="ph-tile-arrow">›</div>
+    </div>
+
+    <div class="project-home-tile" onclick="openReport(currentProjectId)">
+      <div class="ph-tile-icon">📄</div>
+      <div class="ph-tile-body">
+        <div class="ph-tile-title">Ausgaben</div>
+        <div class="ph-tile-sub">Bericht, PDF, CSV, Fotos exportieren</div>
+      </div>
+      <div class="ph-tile-arrow">›</div>
+    </div>
+
+  </div>
+</section>
+
 <!-- ── View: Checkliste ───────────────────────────────────────────────────── -->
 <section id="view-checklist" class="view">
   <div id="cl-project-info" style="margin-bottom:12px;color:var(--outline)"></div>
@@ -1052,8 +1096,11 @@
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="generatePdf()">📥 PDF erstellen & laden</button>
+      <button class="btn btn-primary" id="btn-pdf" onclick="generatePdf()">📥 PDF erstellen & laden</button>
       <button class="btn btn-outline" onclick="sendEmail()">📧 Per E-Mail</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-outline" id="btn-photo-export" onclick="exportPhotos()" style="width:100%">🖼️ Fotos exportieren (Ordner wählen)</button>
     </div>
   </div>
 

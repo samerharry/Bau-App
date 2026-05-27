@@ -18,7 +18,7 @@ let pinPlacingMode    = false;
 let currentPinId      = null; // Pin im Modal
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
-const views = ['login','projects','project-edit','checklist','item-detail','report','floor-plan'];
+const views = ['login','projects','project-home','project-edit','checklist','item-detail','report','floor-plan'];
 
 function showView(name, title, showBack = true) {
   views.forEach(v => document.getElementById('view-' + v).classList.remove('active'));
@@ -30,7 +30,7 @@ function showView(name, title, showBack = true) {
   document.getElementById('btn-save').style.display      = name === 'project-edit' ? 'flex' : 'none';
   document.getElementById('btn-logout').style.display    = name !== 'login'        ? 'flex' : 'none';
   document.getElementById('btn-floor-plan').style.display =
-    (name === 'checklist' || name === 'floor-plan') && currentProjectId ? 'flex' : 'none';
+    (name === 'checklist' || name === 'floor-plan' || name === 'project-home') && currentProjectId ? 'flex' : 'none';
   window.scrollTo(0, 0);
 }
 
@@ -46,7 +46,13 @@ function showLoginView() {
 
 function goBack() {
   if (document.getElementById('view-floor-plan').classList.contains('active')) {
-    openChecklist(currentProjectId); return;
+    openProjectHome(currentProjectId); return;
+  }
+  if (document.getElementById('view-report').classList.contains('active')) {
+    openProjectHome(currentProjectId); return;
+  }
+  if (document.getElementById('view-checklist').classList.contains('active') && currentItemId === null) {
+    openProjectHome(currentProjectId); return;
   }
   if (currentItemId    !== null) { openChecklist(currentProjectId); return; }
   if (currentProjectId !== null) { openProjectList(); return; }
@@ -96,6 +102,37 @@ async function openProjectList() {
   await renderProjectList();
 }
 
+async function openProjectHome(projectId) {
+  currentProjectId = projectId;
+  currentItemId = null; currentItem = null;
+  // Projekt laden (aus Cache oder DB)
+  if (!cachedProject || cachedProject.id !== projectId) {
+    try {
+      const projects = await SB.Projects.list();
+      cachedProject  = projects.find(p => p.id === projectId) || null;
+    } catch(e) { toast('Fehler: ' + e.message); return; }
+  }
+  if (!cachedProject) return;
+  showView('project-home', cachedProject.name);
+  document.getElementById('ph-project-name').textContent =
+    cachedProject.customer + (cachedProject.address ? '  ·  ' + cachedProject.address : '');
+  // Prüfpunkte-Statistik
+  try {
+    if (!cachedItems.length) cachedItems = await SB.Items.list(projectId);
+    const active  = cachedItems.filter(i => !i.isNotApplicable);
+    const checked = active.filter(i => i.isChecked).length;
+    const pct     = active.length ? Math.round(checked / active.length * 100) : 0;
+    document.getElementById('ph-checklist-stat').textContent =
+      `${checked} / ${active.length} geprüft (${pct}%)`;
+  } catch { /* stat bleibt leer */ }
+  // Grundriss-Statistik
+  try {
+    const plans = await SB.FloorPlans.list(projectId);
+    document.getElementById('ph-floorplan-stat').textContent =
+      plans.length ? `${plans.length} Plan${plans.length > 1 ? 'pläne' : ''} vorhanden` : 'Noch keine Pläne';
+  } catch { /* */ }
+}
+
 async function renderProjectList() {
   const el = document.getElementById('project-list');
   el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--outline)">Laden…</div>';
@@ -116,7 +153,7 @@ async function renderProjectList() {
       const ft   = p.buildingData?.fundingType || '';
       const chip = pt === 'ISFP' ? 'iSFP Bestandsaufnahme' : (chipLabel[ft] || ft);
       const date = p.inspectionDate ? new Date(p.inspectionDate).toLocaleDateString('de-DE') : '';
-      return `<div class="project-card" onclick="openChecklist('${p.id}')">
+      return `<div class="project-card" onclick="openProjectHome('${p.id}')">`
         <div class="project-card-accent"></div>
         <div class="project-card-body">
           <div class="project-card-name">${esc(p.name)}</div>
@@ -492,7 +529,7 @@ async function saveProject() {
         toast('Gespeichert');
       }
     }
-    await openChecklist(saved.id);
+    await openProjectHome(saved.id);
   } catch (e) { toast('Fehler: ' + e.message); }
 }
 
@@ -836,6 +873,11 @@ async function openReport(projectId) {
 async function generatePdf() {
   if (!cachedProject) { toast('Bitte zuerst ein Projekt öffnen'); return; }
 
+  // Ladeindikator
+  const btnPdf = document.getElementById('btn-pdf');
+  if (btnPdf) { btnPdf.disabled = true; btnPdf.textContent = '⏳ Wird erstellt…'; }
+  toast('Fotos werden geladen…');
+
   const project = cachedProject;
   const bd      = project.buildingData || {};
   const items   = cachedItems.filter(i => !i.isNotApplicable);
@@ -844,17 +886,22 @@ async function generatePdf() {
   const checked = items.filter(i => i.isChecked).length;
   const pct     = items.length ? Math.round(checked / items.length * 100) : 0;
 
-  // Förderinfo
-  const ftLabel = window.ENUMS?.FUNDING_TYPE?.[bd.fundingType] || bd.fundingType || '';
-  let levelLabel = '';
-  if (bd.fundingType === 'KFW_NEUBAU')
-    levelLabel = window.ENUMS?.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
-  else if (bd.fundingType === 'KFW_SANIERUNG' || bd.fundingType === 'KFW') {
-    levelLabel = window.ENUMS?.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '';
-    if (bd.kfwClass === 'EE') levelLabel += ' + EE-Klasse';
-    if (bd.kfwClass === 'NH') levelLabel += ' + NH-Klasse';
-  } else if (bd.fundingType === 'KFW_HEIZUNG')
-    levelLabel = window.ENUMS?.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '';
+  // Förderinfo – nur für Bauabnahme-Projekte anzeigen
+  const isISFP = bd.projectType === 'ISFP';
+  let ftLabel = '', levelLabel = '';
+  if (isISFP) {
+    ftLabel = 'iSFP – Bestandsaufnahme';
+  } else if (bd.fundingType) {
+    ftLabel = window.ENUMS?.FUNDING_TYPE?.[bd.fundingType] || bd.fundingType;
+    if (bd.fundingType === 'KFW_NEUBAU')
+      levelLabel = window.ENUMS?.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '';
+    else if (bd.fundingType === 'KFW_SANIERUNG' || bd.fundingType === 'KFW') {
+      levelLabel = window.ENUMS?.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '';
+      if (bd.kfwClass === 'EE') levelLabel += ' + EE-Klasse';
+      if (bd.kfwClass === 'NH') levelLabel += ' + NH-Klasse';
+    } else if (bd.fundingType === 'KFW_HEIZUNG')
+      levelLabel = window.ENUMS?.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '';
+  }
 
   // Prüfpunkte nach Kategorien gruppieren
   const grouped = {};
@@ -876,8 +923,11 @@ async function generatePdf() {
           <div class="item-title">${mark}${pflicht}${custom} ${esc(item.title)}</div>
           ${item.description ? `<div class="item-desc">${esc(item.description)}</div>` : ''}
           ${item.notes       ? `<div class="item-notes">📝 ${esc(item.notes)}</div>` : ''}
-          ${itemPh.length    ? `<div class="photos">${itemPh.map(ph =>
-            `<figure><img src="${ph.dataUrl}">${ph.description ? `<figcaption>${esc(ph.description)}</figcaption>` : ''}</figure>`
+          ${itemPh.length    ? `<div class="photos">${itemPh.map((ph, idx) =>
+            `<figure>
+              <img src="${ph.dataUrl}" title="${ph.description ? esc(ph.description) : ''}">
+              <figcaption>${ph.description ? esc(ph.description) : ('Foto ' + (idx + 1))}</figcaption>
+            </figure>`
           ).join('')}</div>` : ''}
         </div>`;
       }).join('')}
@@ -909,10 +959,10 @@ async function generatePdf() {
     .item-notes { font-size: 9pt; color: #2e7d32; margin-top: 2px; }
     .pflicht { color: #c62828; }
     .custom  { color: #888; font-size: 8pt; }
-    .photos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .photos figure { width: 80px; }
-    .photos img { width: 80px; height: 60px; object-fit: cover; border-radius: 3px; border: 1px solid #ddd; }
-    .photos figcaption { font-size: 7pt; color: #777; margin-top: 2px; word-break: break-word; }
+    .photos { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .photos figure { width: 160px; }
+    .photos img { width: 160px; height: 120px; object-fit: cover; border-radius: 4px; border: 1px solid #ddd; display: block; }
+    .photos figcaption { font-size: 8pt; color: #555; margin-top: 3px; word-break: break-word; font-style: italic; }
     @media print {
       body { padding: 0; }
       @page { margin: 15mm; }
@@ -936,6 +986,9 @@ async function generatePdf() {
   ${itemsHtml}
   </body></html>`;
 
+  // Button zurücksetzen
+  if (btnPdf) { btnPdf.disabled = false; btnPdf.textContent = '📥 PDF erstellen & laden'; }
+
   const win = window.open('', '_blank');
   if (!win) {
     alert('Popup wurde blockiert!\n\nBitte erlauben Sie Popups für diese Seite und versuchen Sie es erneut.\n(Browser-Adressleiste → Popup erlauben)');
@@ -943,9 +996,125 @@ async function generatePdf() {
   }
   win.document.write(html);
   win.document.close();
-  // Kurz warten bis Bilder geladen, dann Druckdialog
-  setTimeout(() => { win.focus(); win.print(); }, 800);
-  toast('Druckfenster geöffnet – als PDF speichern');
+  // Warten bis Bilder geladen, dann Druckdialog
+  setTimeout(() => { win.focus(); win.print(); }, 1200);
+  toast('Druckfenster geöffnet – als PDF speichern wählen');
+}
+
+async function exportPhotos() {
+  if (!cachedProject) { toast('Bitte zuerst ein Projekt öffnen'); return; }
+  const items = cachedItems.filter(i => !i.isNotApplicable);
+  if (!items.length) { toast('Keine Prüfpunkte vorhanden'); return; }
+
+  const btn = document.getElementById('btn-photo-export');
+  // Hilfsfunktionen
+  function safeName(str) {
+    return (str || '').replace(/[\\/:*?"<>|]/g, '-').trim().replace(/\s+/g, '_').slice(0, 50);
+  }
+  function dataUrlToBlob(dataUrl) {
+    const [header, data] = dataUrl.split(',');
+    const mime = header.match(/:(.*?);/)[1];
+    const binary = atob(data);
+    const arr = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+  function extFromDataUrl(dataUrl) {
+    const mime = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+    return mime.split('/')[1].replace('jpeg','jpg') || 'jpg';
+  }
+
+  // ── File System Access API (Chrome/Edge auf Windows) ──────────────────────
+  // WICHTIG: showDirectoryPicker muss synchron im Click-Handler aufgerufen
+  // werden – erst danach darf await verwendet werden!
+  if (window.showDirectoryPicker) {
+    let dirHandle;
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch (e) {
+      // Nutzer hat abgebrochen
+      if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+      return;
+    }
+
+    // Fotos erst NACH der Ordnerauswahl laden
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Fotos werden geladen…'; }
+    let allPhotos;
+    try {
+      allPhotos = await SB.Photos.listForItems(items.map(i => i.id));
+    } catch (e) {
+      toast('Fehler beim Laden: ' + e.message);
+      if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+      return;
+    }
+    if (!allPhotos.length) {
+      toast('Keine Fotos im Projekt vorhanden');
+      if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+      return;
+    }
+
+    let count = 0;
+    const photoMap = {};
+    allPhotos.forEach(p => { (photoMap[p.checklistItemId] ??= []).push(p); });
+
+    for (const item of items) {
+      const itemPhotos = photoMap[item.id] || [];
+      if (!itemPhotos.length) continue;
+
+      // Unterordner pro Kategorie
+      const catHandle = await dirHandle.getDirectoryHandle(safeName(item.category), { create: true });
+
+      for (let i = 0; i < itemPhotos.length; i++) {
+        const photo = itemPhotos[i];
+        const desc  = photo.description ? '_' + safeName(photo.description) : '';
+        const ext   = extFromDataUrl(photo.dataUrl);
+        const fname = `${safeName(item.title)}${desc}_${i + 1}.${ext}`;
+        try {
+          const fileHandle = await catHandle.getFileHandle(fname, { create: true });
+          const writable   = await fileHandle.createWritable();
+          await writable.write(dataUrlToBlob(photo.dataUrl));
+          await writable.close();
+          count++;
+          if (btn) btn.textContent = `⏳ ${count} / ${allPhotos.length} Fotos…`;
+        } catch { /* einzelnes Foto überspringen */ }
+      }
+    }
+
+    if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+    toast(`✅ ${count} Fotos in Ordner gespeichert`);
+
+  } else {
+    // ── Fallback: Einzeldownloads (ältere Browser / file://) ────────────────
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Fotos werden geladen…'; }
+    let allPhotos;
+    try {
+      allPhotos = await SB.Photos.listForItems(items.map(i => i.id));
+    } catch (e) {
+      toast('Fehler beim Laden: ' + e.message);
+      if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+      return;
+    }
+    if (!allPhotos.length) {
+      toast('Keine Fotos vorhanden');
+      if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+      return;
+    }
+    toast(`${allPhotos.length} Fotos werden heruntergeladen…`);
+    let count = 0;
+    for (const photo of allPhotos) {
+      const item  = items.find(i => i.id === photo.checklistItemId);
+      const desc  = photo.description ? '_' + safeName(photo.description) : '';
+      const ext   = extFromDataUrl(photo.dataUrl);
+      const fname = `${safeName(item?.category || 'Foto')}_${safeName(item?.title || '')}${desc}_${count + 1}.${ext}`;
+      const a = document.createElement('a');
+      a.href = photo.dataUrl; a.download = fname;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      count++;
+      await new Promise(r => setTimeout(r, 300));
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '🖼️ Fotos exportieren (Ordner wählen)'; }
+    toast(`✅ ${count} Fotos heruntergeladen`);
+  }
 }
 
 async function exportCsv() {
@@ -1116,6 +1285,7 @@ window.newProject       = newProject;
 window.editProject      = editProject;
 window.saveProject      = saveProject;
 window.deleteProject    = deleteProject;
+window.openProjectHome  = openProjectHome;
 window.openChecklist    = openChecklist;
 window.toggleCategory   = toggleCategory;
 window.toggleItem       = toggleItem;
@@ -1135,6 +1305,7 @@ window.openReport       = openReport;
 window.generatePdf      = generatePdf;
 window.exportCsv        = exportCsv;
 window.sendEmail        = sendEmail;
+window.exportPhotos     = exportPhotos;
 window.exportData       = exportData;
 window.importData       = importData;
 window.onFundingChange      = onFundingChange;
