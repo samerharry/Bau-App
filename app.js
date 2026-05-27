@@ -956,7 +956,7 @@ async function generatePdf() {
 
   const html = `<!DOCTYPE html><html lang="de"><head>
   <meta charset="UTF-8">
-  <title>Bauabnahme – ${esc(project.name)}</title>
+  <title>${isISFP ? 'iSFP' : 'Bauabnahme'} – ${esc(project.name)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 11pt; color: #222; padding: 20px; }
@@ -988,7 +988,7 @@ async function generatePdf() {
   </style>
   </head><body>
   <header>
-    <h1>Bauabnahme / Begehungsprotokoll</h1>
+    <h1>${isISFP ? 'iSFP – Bestandsaufnahme' : 'Bauabnahme / Begehungsprotokoll'}</h1>
     <p>Erstellt: ${new Date().toLocaleString('de-DE')}</p>
   </header>
   <div class="meta">
