@@ -762,12 +762,15 @@ async function openReport(projectId) {
   showView('report', 'Bericht erstellen');
 
   // Daten aus Cache oder frisch aus DB laden
+  console.log('[Report] projectId:', projectId, 'cachedProject:', cachedProject?.id);
   if (!cachedProject || cachedProject.id !== projectId) {
     try {
+      toast('Lade Daten…');
       const projects = await SB.Projects.list();
       cachedProject  = projects.find(p => p.id === projectId) || null;
       cachedItems    = cachedProject ? await SB.Items.list(projectId) : [];
-    } catch (e) { toast('Fehler beim Laden: ' + e.message); return; }
+      console.log('[Report] geladen:', cachedProject?.name, cachedItems.length, 'Punkte');
+    } catch (e) { toast('Fehler beim Laden: ' + e.message); console.error(e); return; }
   }
   if (!cachedProject) { toast('Projekt nicht gefunden'); return; }
 
@@ -823,10 +826,6 @@ async function openReport(projectId) {
 }
 
 async function generatePdf() {
-  if (!window.jspdf) {
-    alert('PDF-Bibliothek konnte nicht geladen werden.\n\nBitte prüfen Sie Ihre Internetverbindung und laden Sie die Seite neu (Strg+R / Browser-Reload).');
-    return;
-  }
   if (!cachedProject) { toast('Bitte zuerst ein Projekt öffnen'); return; }
 
   const project = cachedProject;
@@ -834,123 +833,111 @@ async function generatePdf() {
   const items   = cachedItems.filter(i => !i.isNotApplicable);
   const photos  = await SB.Photos.listForItems(items.map(i => i.id));
 
-  try {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-  const PW = 210, MARGIN = 15, CW = PW - 2 * MARGIN;
-  let y = 20;
+  const checked = items.filter(i => i.isChecked).length;
+  const pct     = items.length ? Math.round(checked / items.length * 100) : 0;
 
-  doc.setFillColor(46, 125, 50); doc.rect(0, 0, PW, 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16); doc.setFont(undefined, 'bold');
-  doc.text('Bauabnahme / Begehungsprotokoll', MARGIN, 12);
-  doc.setFontSize(9); doc.setFont(undefined, 'normal');
-  doc.text(`Erstellt: ${new Date().toLocaleString('de-DE')}`, MARGIN, 20);
-  doc.setTextColor(0, 0, 0); y = 36;
-
-  doc.setFontSize(14); doc.setFont(undefined, 'bold');
-  doc.text(project.name, MARGIN, y); y += 7;
-  doc.setFontSize(10); doc.setFont(undefined, 'normal');
-  doc.setTextColor(80, 80, 80);
-  doc.text(`Kunde: ${project.customer}`, MARGIN, y); y += 5;
-  if (project.address) { doc.text(`Adresse: ${project.address}`, MARGIN, y); y += 5; }
-  if (project.inspectionDate) {
-    doc.text(`Begehungsdatum: ${new Date(project.inspectionDate).toLocaleDateString('de-DE')}`, MARGIN, y); y += 5;
-  }
-  if (bd.participants) {
-    const pl = doc.splitTextToSize(`Teilnehmer: ${bd.participants}`, CW);
-    doc.text(pl, MARGIN, y); y += pl.length * 4.5;
-  }
-  const ftLabel = window.ENUMS.FUNDING_TYPE?.[bd.fundingType] || bd.fundingType || '';
+  // Förderinfo
+  const ftLabel = window.ENUMS?.FUNDING_TYPE?.[bd.fundingType] || bd.fundingType || '';
   let levelLabel = '';
-  if (bd.fundingType === 'KFW_NEUBAU') {
-    levelLabel = window.ENUMS.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
-  } else if (bd.fundingType === 'KFW_SANIERUNG' || bd.fundingType === 'KFW') {
-    levelLabel = window.ENUMS.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '';
+  if (bd.fundingType === 'KFW_NEUBAU')
+    levelLabel = window.ENUMS?.KFW_NEUBAU_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || 'Effizienzhaus 40';
+  else if (bd.fundingType === 'KFW_SANIERUNG' || bd.fundingType === 'KFW') {
+    levelLabel = window.ENUMS?.KFW_LEVEL?.[bd.kfwLevel] || bd.kfwLevel || '';
     if (bd.kfwClass === 'EE') levelLabel += ' + EE-Klasse';
     if (bd.kfwClass === 'NH') levelLabel += ' + NH-Klasse';
-  } else if (bd.fundingType === 'KFW_HEIZUNG') {
-    levelLabel = window.ENUMS.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '';
-  }
-  doc.text(`Projektart: ${ftLabel}${levelLabel ? ' - ' + levelLabel : ''}`, MARGIN, y); y += 5;
-  doc.setTextColor(0, 0, 0);
+  } else if (bd.fundingType === 'KFW_HEIZUNG')
+    levelLabel = window.ENUMS?.KFW_HEIZUNG_TYPE?.[bd.heizungType] || bd.heizungType || '';
 
-  const checked = items.filter(i => i.isChecked).length;
-  const pct = items.length ? checked / items.length : 0;
-  y += 4;
-  doc.setFontSize(11); doc.setFont(undefined, 'bold');
-  doc.text(`Fortschritt: ${checked} / ${items.length} geprueft (${Math.round(pct*100)}%)`, MARGIN, y); y += 4;
-  doc.setFillColor(220,220,220); doc.rect(MARGIN, y, CW, 5, 'F');
-  doc.setFillColor(76,175,80);   doc.rect(MARGIN, y, CW*pct, 5, 'F');
-  y += 12;
-  doc.setDrawColor(200,200,200); doc.line(MARGIN, y-3, PW-MARGIN, y-3);
-
+  // Prüfpunkte nach Kategorien gruppieren
   const grouped = {};
   items.forEach(item => { (grouped[item.category] ??= []).push(item); });
 
-  for (const [cat, catItems] of Object.entries(grouped)) {
-    if (y > 260) { doc.addPage(); y = 20; }
-    doc.setFillColor(232,245,233);
-    doc.rect(MARGIN-2, y-4, CW+4, 7, 'F');
-    doc.setFontSize(10); doc.setFont(undefined, 'bold');
-    doc.setTextColor(27,94,32);
-    doc.text(cat, MARGIN, y); y += 6;
-    doc.setTextColor(0,0,0);
+  // Fotos als <img>-Tags aufbereiten
+  const photoMap = {};
+  photos.forEach(p => { (photoMap[p.checklistItemId] ??= []).push(p); });
 
-    for (const item of catItems) {
-      if (y > 265) { doc.addPage(); y = 20; }
-      doc.setFontSize(9); doc.setFont(undefined, 'normal');
-      // ASCII-Zeichen statt Unicode (jsPDF Standard-Font)
-      const mark = item.isChecked ? '[OK]' : '[  ]';
-      const customMark = item.isCustom ? ' [eigener Punkt]' : '';
-      const lines = doc.splitTextToSize(`${mark} ${item.title}${item.isMandatory?' *':''}${customMark}`, CW-6);
-      doc.setTextColor(item.isChecked ? 120 : 0, item.isChecked ? 120 : 0, item.isChecked ? 120 : 0);
-      doc.text(lines, MARGIN+2, y); y += lines.length * 4.5;
-      if (item.description) {
-        doc.setFontSize(8); doc.setTextColor(120,120,120);
-        const dl = doc.splitTextToSize(item.description, CW-10);
-        doc.text(dl, MARGIN+6, y); y += dl.length*4;
-      }
-      if (item.notes) {
-        doc.setFontSize(8); doc.setTextColor(46,125,50);
-        const nl = doc.splitTextToSize('Notiz: ' + item.notes, CW-10);
-        doc.text(nl, MARGIN+6, y); y += nl.length * 4;
-      }
-      const itemPhotos = photos.filter(p => p.checklistItemId === item.id);
-      if (itemPhotos.length) {
-        let px = MARGIN+6;
-        for (const photo of itemPhotos.slice(0, 4)) {
-          if (y > 250 || px+30 > PW-MARGIN) break;
-          try {
-            doc.addImage(photo.dataUrl, 'JPEG', px, y, 25, 25);
-            if (photo.description) {
-              doc.setFontSize(6); doc.setTextColor(80,80,80);
-              doc.text(doc.splitTextToSize(photo.description, 25), px, y+27);
-            }
-            px += 28;
-          } catch {}
-        }
-        y += 32;
-      }
-      doc.setTextColor(0,0,0); y += 1;
+  const itemsHtml = Object.entries(grouped).map(([cat, catItems]) => `
+    <div class="category">
+      <h3>${esc(cat)}</h3>
+      ${catItems.map(item => {
+        const mark    = item.isChecked ? '✅' : '⬜';
+        const pflicht = item.isMandatory ? ' <span class="pflicht">*</span>' : '';
+        const custom  = item.isCustom   ? ' <span class="custom">[eigener Punkt]</span>' : '';
+        const itemPh  = (photoMap[item.id] || []).slice(0, 6);
+        return `<div class="item ${item.isChecked ? 'checked' : ''}">
+          <div class="item-title">${mark}${pflicht}${custom} ${esc(item.title)}</div>
+          ${item.description ? `<div class="item-desc">${esc(item.description)}</div>` : ''}
+          ${item.notes       ? `<div class="item-notes">📝 ${esc(item.notes)}</div>` : ''}
+          ${itemPh.length    ? `<div class="photos">${itemPh.map(ph =>
+            `<figure><img src="${ph.dataUrl}">${ph.description ? `<figcaption>${esc(ph.description)}</figcaption>` : ''}</figure>`
+          ).join('')}</div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+
+  const dateStr = project.inspectionDate
+    ? new Date(project.inspectionDate).toLocaleDateString('de-DE') : '–';
+
+  const html = `<!DOCTYPE html><html lang="de"><head>
+  <meta charset="UTF-8">
+  <title>Bauabnahme – ${esc(project.name)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 11pt; color: #222; padding: 20px; }
+    header { background: #2e7d32; color: #fff; padding: 14px 18px; border-radius: 6px; margin-bottom: 18px; }
+    header h1 { font-size: 16pt; } header p { font-size: 9pt; opacity: .85; margin-top: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; margin-bottom: 16px; font-size: 10pt; }
+    .meta span { color: #555; } .meta strong { color: #222; }
+    .progress { background: #eee; border-radius: 4px; height: 10px; margin-bottom: 4px; }
+    .progress-bar { background: #4caf50; height: 10px; border-radius: 4px; width: ${pct}%; }
+    .progress-label { font-size: 10pt; color: #555; margin-bottom: 14px; }
+    .category { margin-bottom: 14px; break-inside: avoid; }
+    .category h3 { background: #e8f5e9; color: #1b5e20; padding: 4px 8px; border-radius: 3px; font-size: 10pt; margin-bottom: 6px; }
+    .item { padding: 4px 8px; border-left: 3px solid #eee; margin-bottom: 4px; break-inside: avoid; }
+    .item.checked { border-left-color: #4caf50; }
+    .item-title { font-size: 10pt; }
+    .item.checked .item-title { color: #777; }
+    .item-desc  { font-size: 8.5pt; color: #888; margin-top: 1px; }
+    .item-notes { font-size: 9pt; color: #2e7d32; margin-top: 2px; }
+    .pflicht { color: #c62828; }
+    .custom  { color: #888; font-size: 8pt; }
+    .photos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .photos figure { width: 80px; }
+    .photos img { width: 80px; height: 60px; object-fit: cover; border-radius: 3px; border: 1px solid #ddd; }
+    .photos figcaption { font-size: 7pt; color: #777; margin-top: 2px; word-break: break-word; }
+    @media print {
+      body { padding: 0; }
+      @page { margin: 15mm; }
     }
-    y += 3;
-  }
-  const filename = `Bauabnahme_${project.name.replace(/[^a-zA-Z0-9]/g,'_')}_${Date.now()}.pdf`;
-  const blob = doc.output('blob');
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
-  toast('PDF wird heruntergeladen…');
+  </style>
+  </head><body>
+  <header>
+    <h1>Bauabnahme / Begehungsprotokoll</h1>
+    <p>Erstellt: ${new Date().toLocaleString('de-DE')}</p>
+  </header>
+  <div class="meta">
+    <div><span>Projekt: </span><strong>${esc(project.name)}</strong></div>
+    <div><span>Kunde: </span><strong>${esc(project.customer)}</strong></div>
+    ${project.address ? `<div><span>Adresse: </span><strong>${esc(project.address)}</strong></div>` : ''}
+    <div><span>Begehungsdatum: </span><strong>${dateStr}</strong></div>
+    ${bd.participants ? `<div style="grid-column:1/-1"><span>Teilnehmer: </span><strong>${esc(bd.participants)}</strong></div>` : ''}
+    ${ftLabel ? `<div><span>Förderprogramm: </span><strong>${esc(ftLabel)}${levelLabel ? ' – ' + esc(levelLabel) : ''}</strong></div>` : ''}
+  </div>
+  <div class="progress"><div class="progress-bar"></div></div>
+  <div class="progress-label">Fortschritt: ${checked} / ${items.length} geprüft (${pct}%)</div>
+  ${itemsHtml}
+  </body></html>`;
 
-  } catch (err) {
-    alert('PDF-Fehler: ' + err.message + '\n\nBitte melden Sie diesen Fehler.');
-    console.error('PDF generation error:', err);
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Popup wurde blockiert!\n\nBitte erlauben Sie Popups für diese Seite und versuchen Sie es erneut.\n(Browser-Adressleiste → Popup erlauben)');
+    return;
   }
+  win.document.write(html);
+  win.document.close();
+  // Kurz warten bis Bilder geladen, dann Druckdialog
+  setTimeout(() => { win.focus(); win.print(); }, 800);
+  toast('Druckfenster geöffnet – als PDF speichern');
 }
 
 async function exportCsv() {
