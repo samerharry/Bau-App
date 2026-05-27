@@ -166,7 +166,7 @@ async function renderProjectList() {
       const ft   = p.buildingData?.fundingType || '';
       const chip = pt === 'ISFP' ? 'iSFP Bestandsaufnahme' : (chipLabel[ft] || ft);
       const date = p.inspectionDate ? new Date(p.inspectionDate).toLocaleDateString('de-DE') : '';
-      return `<div class="project-card" onclick="openProjectHome('${p.id}')">
+      return `<div class="project-card" onclick="openProjectHome('${p.id}', '${esc(p.name).replace(/'/g,"\\'")}')">
         <div class="project-card-accent"></div>
         <div class="project-card-body">
           <div class="project-card-name">${esc(p.name)}</div>
@@ -542,7 +542,7 @@ async function saveProject() {
         toast('Gespeichert');
       }
     }
-    await openProjectHome(saved.id);
+    await openProjectHome(saved.id, saved.name);
   } catch (e) { toast('Fehler: ' + e.message); }
 }
 
@@ -920,9 +920,14 @@ async function generatePdf() {
   const grouped = {};
   items.forEach(item => { (grouped[item.category] ??= []).push(item); });
 
-  // Fotos als <img>-Tags aufbereiten
+  // Fotos für PDF nochmals auf 800px / JPEG 70% verkleinern
+  // (Upload-Komprimierung ist 1600px/80% – für PDF reicht weniger)
+  toast('Fotos werden komprimiert…');
+  const compressedPhotos = await Promise.all(
+    photos.map(async p => ({ ...p, dataUrl: await compressImage(p.dataUrl, 800, 0.70) }))
+  );
   const photoMap = {};
-  photos.forEach(p => { (photoMap[p.checklistItemId] ??= []).push(p); });
+  compressedPhotos.forEach(p => { (photoMap[p.checklistItemId] ??= []).push(p); });
 
   const itemsHtml = Object.entries(grouped).map(([cat, catItems]) => `
     <div class="category">
@@ -1241,6 +1246,25 @@ function fileToDataUrl(file) {
   });
 }
 
+// Foto auf max. 1600px skalieren und als JPEG 80% speichern
+// → reduziert typische Handyfotos von 3–5 MB auf ~200–400 KB
+function compressImage(dataUrl, maxPx = 1600, quality = 0.80) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width  * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl); // Fallback: Original
+    img.src = dataUrl;
+  });
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const APP_VERSION = '2.1';
 document.addEventListener('DOMContentLoaded', () => {
@@ -1251,7 +1275,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!file || currentItemId === null) return;
     const itemId = currentItemId;   // lokale Kopie, bevor async-Kette startet
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const raw   = await fileToDataUrl(file);
+      const dataUrl = await compressImage(raw);
       if (!itemId) { toast('Kein Prüfpunkt ausgewählt'); e.target.value = ''; return; }
       const photo = await SB.Photos.save({ checklistItemId: itemId, dataUrl, description: '' });
       await renderPhotos(itemId);
@@ -1513,7 +1538,8 @@ async function onPinPhoto(input) {
   if (!file || !currentPinId) return;
   const { pinId } = currentPinId;
   try {
-    const dataUrl = await fileToDataUrl(file);
+    const raw     = await fileToDataUrl(file);
+    const dataUrl = await compressImage(raw);
     const photo   = await SB.PinPhotos.save({ pinId, dataUrl, description: document.getElementById('pin-modal-label').value || '' });
     appendPinPhotoThumb(photo);
     input.value = '';
