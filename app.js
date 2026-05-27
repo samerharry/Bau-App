@@ -760,8 +760,19 @@ async function savePhotoDesc() {
 // ── Bericht ──────────────────────────────────────────────────────────────────
 async function openReport(projectId) {
   showView('report', 'Bericht erstellen');
+
+  // Daten aus Cache oder frisch aus DB laden
+  if (!cachedProject || cachedProject.id !== projectId) {
+    try {
+      const projects = await SB.Projects.list();
+      cachedProject  = projects.find(p => p.id === projectId) || null;
+      cachedItems    = cachedProject ? await SB.Items.list(projectId) : [];
+    } catch (e) { toast('Fehler beim Laden: ' + e.message); return; }
+  }
+  if (!cachedProject) { toast('Projekt nicht gefunden'); return; }
+
   const project  = cachedProject;
-  const bd       = project.buildingData;
+  const bd       = project.buildingData || {};
   const allItems = cachedItems;
   const items    = allItems.filter(i => !i.isNotApplicable);
   const photos   = await SB.Photos.listForItems(items.map(i => i.id));
@@ -811,12 +822,13 @@ async function openReport(projectId) {
 }
 
 async function generatePdf() {
+  if (!window.jspdf) { toast('PDF-Bibliothek nicht geladen – bitte Seite neu laden'); return; }
+  if (!cachedProject) { toast('Bitte zuerst ein Projekt öffnen'); return; }
+
   const project = cachedProject;
-  const bd      = project.buildingData;
+  const bd      = project.buildingData || {};
   const items   = cachedItems.filter(i => !i.isNotApplicable);
   const photos  = await SB.Photos.listForItems(items.map(i => i.id));
-
-  if (!window.jspdf) { toast('PDF-Bibliothek lädt…'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
   const PW = 210, MARGIN = 15, CW = PW - 2 * MARGIN;
@@ -915,8 +927,24 @@ async function generatePdf() {
     }
     y += 3;
   }
-  doc.save(`Bauabnahme_${project.name.replace(/[^a-zA-Z0-9]/g,'_')}_${Date.now()}.pdf`);
-  toast('PDF gespeichert');
+  const filename = `Bauabnahme_${project.name.replace(/[^a-zA-Z0-9]/g,'_')}_${Date.now()}.pdf`;
+  try {
+    // Blob-Download (funktioniert zuverlässig auf Android + Desktop)
+    const blob = doc.output('blob');
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+    toast('PDF wird heruntergeladen…');
+  } catch {
+    // Fallback: neues Tab öffnen
+    const dataUri = doc.output('datauristring');
+    window.open(dataUri, '_blank');
+    toast('PDF in neuem Tab geöffnet');
+  }
 }
 
 async function exportCsv() {
