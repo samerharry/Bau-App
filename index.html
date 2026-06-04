@@ -1167,6 +1167,10 @@
       <button class="btn btn-outline" onclick="closeModal('photo-modal')">Abbrechen</button>
       <button class="btn btn-primary" onclick="savePhotoDesc()">Speichern</button>
     </div>
+    <button class="btn btn-outline" id="btn-assign-pin" onclick="assignPhotoToFloorPlan()"
+            style="width:100%;margin-top:8px;display:none">
+      📍 Auf Grundriss setzen
+    </button>
   </div>
 </div>
 
@@ -1224,6 +1228,24 @@
       <button class="btn btn-outline" onclick="deletePinModal()">🗑️ Löschen</button>
       <button class="btn btn-outline" onclick="closeModal('pin-modal')">Abbrechen</button>
       <button class="btn btn-primary" onclick="savePinModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Grundriss-Zuweisung Modal ══════════════════════════════════════════ -->
+<div class="modal-overlay" id="assign-pin-modal" onclick="if(event.target===this)closeModal('assign-pin-modal')">
+  <div class="modal" style="max-height:92vh;overflow-y:auto">
+    <h3>📍 Auf Grundriss setzen</h3>
+    <div id="assign-plan-tabs" style="margin-bottom:10px;overflow-x:auto;white-space:nowrap;display:none"></div>
+    <p style="font-size:13px;color:var(--outline);margin:0 0 8px">
+      Auf den Grundriss tippen, um den Pin zu setzen:
+    </p>
+    <div style="position:relative;border-radius:8px;overflow:hidden;background:#e8e8e8;max-height:52vh">
+      <canvas id="assign-canvas" style="width:100%;display:block;cursor:crosshair;touch-action:none"></canvas>
+      <div id="assign-pins" style="position:absolute;inset:0;pointer-events:none"></div>
+    </div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn btn-outline" onclick="closeModal('assign-pin-modal')" style="width:100%">Abbrechen</button>
     </div>
   </div>
 </div>

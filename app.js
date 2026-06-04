@@ -16,6 +16,11 @@ let currentPlanIdx    = 0;    // aktiv angezeigter Plan
 let currentPins       = {};   // { planId: [pin, …] }
 let pinPlacingMode    = false;
 let currentPinId      = null; // Pin im Modal
+// Foto → Grundriss-Zuweisung
+let photoToAssign    = null;  // { id, dataUrl, description }
+let assignPlanIdx    = 0;
+let assignFloorPlans = [];
+let assignPinCache   = {};
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
 const views = ['login','projects','project-home','project-edit','checklist','item-detail','report','floor-plan'];
@@ -796,6 +801,8 @@ async function showPhotoModal(photoId) {
   document.getElementById('modal-photo-img').src    = photo.dataUrl;
   document.getElementById('modal-photo-desc').value = photo.description || '';
   document.getElementById('modal-photo-id').value   = photoId;
+  // Assign-Button zeigen: nur bei Prüfpunkt-Fotos (nicht bei Pin-Fotos)
+  document.getElementById('btn-assign-pin').style.display = currentItemId ? 'block' : 'none';
   document.getElementById('photo-modal').classList.add('open');
 }
 
@@ -929,6 +936,62 @@ async function generatePdf() {
   const photoMap = {};
   compressedPhotos.forEach(p => { (photoMap[p.checklistItemId] ??= []).push(p); });
 
+  // ── Grundrisse laden ─────────────────────────────────────────────────────────
+  toast('Grundrisse werden geladen…');
+  let floorPlanHtml = '';
+  try {
+    const plans = await SB.FloorPlans.list(project.id);
+    if (plans.length) {
+      const planSections = [];
+      for (const plan of plans) {
+        const pins = await SB.FloorPins.list(plan.id);
+        const pinSections = [];
+        for (let i = 0; i < pins.length; i++) {
+          const pinPhotos = await SB.PinPhotos.list(pins[i].id);
+          const compPinPhotos = await Promise.all(
+            pinPhotos.map(async p => ({ ...p, dataUrl: await compressImage(p.dataUrl, 800, 0.70) }))
+          );
+          pinSections.push({ pin: pins[i], idx: i + 1, photos: compPinPhotos });
+        }
+        const planImg = await compressImage(plan.dataUrl, 1600, 0.80);
+        planSections.push({ plan: { ...plan, dataUrl: planImg }, pins, pinSections });
+      }
+
+      floorPlanHtml = `
+      <div style="page-break-before:always;margin-top:20px">
+        <h2 style="font-size:13pt;color:#1b5e20;margin:0 0 14px;border-bottom:2px solid #4caf50;padding-bottom:5px">Grundrisse</h2>
+        ${planSections.map(({ plan, pins, pinSections }) => `
+          <div style="margin-bottom:28px">
+            <h3 style="font-size:11pt;font-weight:700;margin-bottom:8px">${esc(plan.name)}</h3>
+            <div style="position:relative;margin-bottom:12px;line-height:0">
+              <img src="${plan.dataUrl}" style="width:100%;display:block;border:1px solid #ddd;border-radius:4px">
+              ${pins.map((pin, i) => `
+                <div style="position:absolute;left:${pin.xPct*100}%;top:${pin.yPct*100}%;
+                            transform:translate(-50%,-50%);background:#e53935;color:#fff;
+                            border-radius:50%;width:22px;height:22px;line-height:22px;
+                            text-align:center;font-size:11px;font-weight:bold;
+                            border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.55)">
+                  ${i + 1}
+                </div>`).join('')}
+            </div>
+            ${pinSections.map(({ pin, idx, photos }) => `
+              <div style="margin-bottom:8px;padding:6px 10px;border-left:3px solid #e53935;break-inside:avoid">
+                <div style="font-weight:700;font-size:10pt">📍 ${idx}: ${esc(pin.label) || '(kein Titel)'}</div>
+                ${pin.description ? `<div style="font-size:9pt;color:#555;margin-top:2px">${esc(pin.description)}</div>` : ''}
+                ${photos.length ? `
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+                    ${photos.map((ph, j) => `
+                      <figure style="margin:0">
+                        <img src="${ph.dataUrl}" style="width:130px;height:98px;object-fit:cover;border-radius:4px;border:1px solid #ddd;display:block">
+                        <figcaption style="font-size:8pt;color:#555;margin-top:2px;font-style:italic;line-height:1.3">${esc(ph.description) || ('Foto ' + (j + 1))}</figcaption>
+                      </figure>`).join('')}
+                  </div>` : ''}
+              </div>`).join('')}
+          </div>`).join('')}
+      </div>`;
+    }
+  } catch (e) { console.warn('[PDF] Grundrisse konnten nicht geladen werden:', e); }
+
   const itemsHtml = Object.entries(grouped).map(([cat, catItems]) => `
     <div class="category">
       <h3>${esc(cat)}</h3>
@@ -1002,6 +1065,7 @@ async function generatePdf() {
   <div class="progress"><div class="progress-bar"></div></div>
   <div class="progress-label">Fortschritt: ${checked} / ${items.length} geprüft (${pct}%)</div>
   ${itemsHtml}
+  ${floorPlanHtml}
   </body></html>`;
 
   // Button zurücksetzen
@@ -1285,6 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('modal-photo-img').src    = photo.dataUrl;
       document.getElementById('modal-photo-desc').value = '';
       document.getElementById('modal-photo-id').value   = photo.id;
+      document.getElementById('btn-assign-pin').style.display = 'block'; // Grundriss-Zuweisung erlauben
       document.getElementById('photo-modal').classList.add('open');
     } catch (err) {
       toast('Fehler beim Speichern: ' + err.message);
@@ -1557,6 +1622,7 @@ function appendPinPhotoThumb(photo) {
     document.getElementById('modal-photo-img').src    = photo.dataUrl;
     document.getElementById('modal-photo-id').value   = photo.id;
     document.getElementById('modal-photo-desc').value = photo.description;
+    document.getElementById('btn-assign-pin').style.display = 'none'; // Pin-Foto: kein Grundriss-Assign
     document.getElementById('photo-modal').classList.add('open');
   };
   const del = document.createElement('button');
@@ -1576,6 +1642,114 @@ async function loadPinPhotos(pinId) {
     photos.forEach(appendPinPhotoThumb);
   } catch (e) { /* ignore */ }
 }
+
+// ── Foto → Grundriss-Zuweisung ────────────────────────────────────────────────
+async function assignPhotoToFloorPlan() {
+  const photoId = document.getElementById('modal-photo-id').value;
+  const desc    = document.getElementById('modal-photo-desc').value.trim();
+  const imgSrc  = document.getElementById('modal-photo-img').src;
+  photoToAssign = { id: photoId, dataUrl: imgSrc, description: desc };
+
+  // Beschreibung vorab speichern
+  if (desc) { try { await SB.Photos.updateDesc(photoId, desc); } catch (_) {} }
+
+  closeModal('photo-modal');
+  toast('Lade Grundrisse…');
+  try {
+    assignFloorPlans = await SB.FloorPlans.list(currentProjectId);
+    assignPinCache   = {};
+    for (const plan of assignFloorPlans) {
+      assignPinCache[plan.id] = await SB.FloorPins.list(plan.id);
+    }
+  } catch (e) { toast('Fehler beim Laden: ' + e.message); return; }
+
+  if (!assignFloorPlans.length) {
+    toast('Keine Grundrisse vorhanden – bitte zuerst im Grundriss-Bereich einen Plan hochladen');
+    return;
+  }
+  assignPlanIdx = 0;
+  renderAssignModal();
+  document.getElementById('assign-pin-modal').classList.add('open');
+}
+
+function renderAssignModal() {
+  const tabs = document.getElementById('assign-plan-tabs');
+  if (assignFloorPlans.length > 1) {
+    tabs.style.display = 'block';
+    tabs.innerHTML = assignFloorPlans.map((p, i) =>
+      `<button class="btn ${i === assignPlanIdx ? 'btn-primary' : 'btn-outline'}"
+               style="font-size:12px;padding:5px 10px;margin-right:6px"
+               onclick="selectAssignPlanTab(${i})">${esc(p.name)}</button>`
+    ).join('');
+  } else {
+    tabs.style.display = 'none';
+  }
+
+  const plan = assignFloorPlans[assignPlanIdx];
+  if (!plan) return;
+
+  const canvas = document.getElementById('assign-canvas');
+  const img    = new Image();
+  img.onload = () => {
+    canvas.width  = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    renderAssignPinMarkers(plan);
+  };
+  img.src = plan.dataUrl;
+}
+
+function renderAssignPinMarkers(plan) {
+  const pinsDiv = document.getElementById('assign-pins');
+  const canvas  = document.getElementById('assign-canvas');
+  const pins    = assignPinCache[plan.id] || [];
+  pinsDiv.innerHTML = pins.map((pin, i) =>
+    `<div class="fp-pin" style="left:${pin.xPct*100}%;top:${pin.yPct*100}%"
+          title="${esc(pin.label)}"><span>${i + 1}</span></div>`
+  ).join('');
+
+  canvas.onclick = async (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const xPct = (e.clientX - rect.left) / rect.width;
+    const yPct = (e.clientY - rect.top)  / rect.height;
+    await placeAssignPin(plan.id, xPct, yPct);
+  };
+}
+
+async function placeAssignPin(planId, xPct, yPct) {
+  if (!photoToAssign) return;
+  try {
+    const itemName = currentItem?.title || '';
+    const desc     = photoToAssign.description || '';
+    const label    = desc || itemName || 'Foto-Pin';
+    const pinDesc  = (itemName && desc) ? `${itemName}: ${desc}` : (itemName || desc);
+
+    const pin = await SB.FloorPins.save({
+      floorPlanId: planId, xPct, yPct, label, description: pinDesc
+    });
+    await SB.PinPhotos.save({ pinId: pin.id, dataUrl: photoToAssign.dataUrl, description: label });
+
+    // Cache aktualisieren
+    if (!assignPinCache[planId]) assignPinCache[planId] = [];
+    assignPinCache[planId].push(pin);
+    if (!currentPins[planId]) currentPins[planId] = [];
+    currentPins[planId].push(pin);
+
+    closeModal('assign-pin-modal');
+    toast('📍 Pin gesetzt und Foto verknüpft');
+    photoToAssign = null;
+
+    // Fotos neu laden falls noch im item-detail
+    if (currentItemId) await renderPhotos(currentItemId);
+  } catch (e) { toast('Fehler: ' + e.message); }
+}
+
+function selectAssignPlanTab(idx) {
+  assignPlanIdx = idx;
+  renderAssignModal();
+}
+window.selectAssignPlanTab    = selectAssignPlanTab;
+window.assignPhotoToFloorPlan = assignPhotoToFloorPlan;
 
 async function onFloorPlanFile(input) {
   const file = input.files[0];
