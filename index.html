@@ -31,8 +31,10 @@
 <div id="toast"></div>
 
 <!-- ══ Foto-Eingabe (versteckt) ══════════════════════════════════════════════ -->
-<input type="file" id="photo-input-camera"  accept="image/*" capture="environment" style="display:none">
-<input type="file" id="photo-input-gallery" accept="image/*"                       style="display:none">
+<input type="file" id="photo-input-camera"    accept="image/*" capture="environment" style="display:none">
+<input type="file" id="photo-input-gallery"   accept="image/*"                       style="display:none">
+<input type="file" id="fotodoku-input-camera" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="fotodoku-input-gallery" accept="image/*"                      style="display:none">
 
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 <main>
@@ -974,6 +976,15 @@
       <div class="ph-tile-arrow">›</div>
     </div>
 
+    <div class="project-home-tile" id="ph-fotodoku-tile" onclick="openFotodoku(currentProjectId)" style="display:none">
+      <div class="ph-tile-icon">📸</div>
+      <div class="ph-tile-body">
+        <div class="ph-tile-title">Fotodokumentation</div>
+        <div class="ph-tile-sub" id="ph-fotodoku-stat">Begehungen dokumentieren</div>
+      </div>
+      <div class="ph-tile-arrow">›</div>
+    </div>
+
     <div class="project-home-tile" onclick="openReport(currentProjectId)">
       <div class="ph-tile-icon">📄</div>
       <div class="ph-tile-body">
@@ -1149,6 +1160,18 @@
   <div id="fp-pin-list" style="margin-top:16px"></div>
 
   <div style="height:32px"></div>
+</section>
+
+<!-- ── View: Fotodokumentation ──────────────────────────────────────────── -->
+<section id="view-fotodoku" class="view">
+  <div id="fotodoku-list">
+    <div style="text-align:center;padding:40px;color:var(--outline)">Laden…</div>
+  </div>
+  <div style="padding:4px 0 24px">
+    <button class="btn btn-primary" style="width:100%" onclick="newBegehung()">
+      + Neue Begehung hinzufügen
+    </button>
+  </div>
 </section>
 
 </main>

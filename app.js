@@ -21,9 +21,15 @@ let photoToAssign    = null;  // { id, dataUrl, description }
 let assignPlanIdx    = 0;
 let assignFloorPlans = [];
 let assignPinCache   = {};
+// Fotodokumentation
+const FOTODOKU_CAT   = '__FOTODOKU__';
+let cachedFotodokuItems  = [];
+let fotodokuActiveItemId = null;
+let fotodokuNoteTimers   = {};
+let photoModalCloseCallback = null; // nach Foto-Beschreibung speichern
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
-const views = ['login','projects','project-home','project-edit','checklist','item-detail','report','floor-plan'];
+const views = ['login','projects','project-home','project-edit','checklist','item-detail','report','floor-plan','fotodoku'];
 
 function showView(name, title, showBack = true) {
   views.forEach(v => { const el = document.getElementById('view-' + v); if (el) el.classList.remove('active'); });
@@ -37,7 +43,7 @@ function showView(name, title, showBack = true) {
   document.getElementById('btn-save').style.display      = name === 'project-edit' ? 'flex' : 'none';
   document.getElementById('btn-logout').style.display    = name !== 'login'        ? 'flex' : 'none';
   document.getElementById('btn-floor-plan').style.display =
-    (name === 'checklist' || name === 'floor-plan' || name === 'project-home') && currentProjectId ? 'flex' : 'none';
+    (name === 'checklist' || name === 'floor-plan' || name === 'project-home' || name === 'fotodoku') && currentProjectId ? 'flex' : 'none';
   window.scrollTo(0, 0);
 }
 
@@ -52,6 +58,9 @@ function showLoginView() {
 }
 
 function goBack() {
+  if (document.getElementById('view-fotodoku').classList.contains('active')) {
+    openProjectHome(currentProjectId); return;
+  }
   if (document.getElementById('view-floor-plan').classList.contains('active')) {
     openProjectHome(currentProjectId); return;
   }
@@ -133,9 +142,12 @@ async function openProjectHome(projectId, projectName) {
   document.getElementById('ph-project-name').textContent =
     cachedProject.customer + (cachedProject.address ? '  ·  ' + cachedProject.address : '');
 
-  // Prüfpunkte-Statistik
+  // Prüfpunkte-Statistik (Fotodoku-Einträge herausfiltern)
   try {
-    if (!cachedItems.length) cachedItems = await SB.Items.list(projectId);
+    if (!cachedItems.length) {
+      const all  = await SB.Items.list(projectId);
+      cachedItems = all.filter(i => i.category !== FOTODOKU_CAT);
+    }
     const active  = cachedItems.filter(i => !i.isNotApplicable);
     const checked = active.filter(i => i.isChecked).length;
     const pct     = active.length ? Math.round(checked / active.length * 100) : 0;
@@ -149,6 +161,22 @@ async function openProjectHome(projectId, projectName) {
     document.getElementById('ph-floorplan-stat').textContent =
       plans.length ? `${plans.length} Plan${plans.length > 1 ? 'pläne' : ''} vorhanden` : 'Noch keine Pläne';
   } catch { document.getElementById('ph-floorplan-stat').textContent = 'Pläne und Markierungen'; }
+
+  // Fotodokumentation-Kachel: bei iSFP ausblenden
+  const isISFP = cachedProject?.buildingData?.projectType === 'ISFP';
+  const fdTile = document.getElementById('ph-fotodoku-tile');
+  if (fdTile) fdTile.style.display = isISFP ? 'none' : 'flex';
+
+  // Fotodoku-Statistik
+  if (!isISFP) {
+    try {
+      cachedFotodokuItems = await SB.Items.listFotodoku(projectId);
+      document.getElementById('ph-fotodoku-stat').textContent =
+        cachedFotodokuItems.length
+          ? `${cachedFotodokuItems.length} Begehung${cachedFotodokuItems.length > 1 ? 'en' : ''} dokumentiert`
+          : 'Noch keine Einträge';
+    } catch { document.getElementById('ph-fotodoku-stat').textContent = 'Begehungen dokumentieren'; }
+  }
 }
 
 async function renderProjectList() {
@@ -561,7 +589,8 @@ async function openChecklist(projectId) {
     cachedProject  = projects.find(p => p.id === projectId);
     if (!cachedProject) return;
     showView('checklist', cachedProject.name);
-    cachedItems = await SB.Items.list(projectId);
+    const all   = await SB.Items.list(projectId);
+    cachedItems = all.filter(i => i.category !== FOTODOKU_CAT);
     renderChecklist();
   } catch (e) { toast('Fehler: ' + e.message); }
 }
@@ -811,7 +840,13 @@ async function savePhotoDesc() {
   const desc = document.getElementById('modal-photo-desc').value.trim();
   await SB.Photos.updateDesc(id, desc);
   closeModal('photo-modal');
-  await renderPhotos(currentItemId);
+  if (photoModalCloseCallback) {
+    const cb = photoModalCloseCallback;
+    photoModalCloseCallback = null;
+    await cb();
+  } else if (currentItemId) {
+    await renderPhotos(currentItemId);
+  }
 }
 
 // ── Bericht ──────────────────────────────────────────────────────────────────
@@ -992,6 +1027,39 @@ async function generatePdf() {
     }
   } catch (e) { console.warn('[PDF] Grundrisse konnten nicht geladen werden:', e); }
 
+  // ── Fotodokumentation laden ───────────────────────────────────────────────────
+  toast('Fotodokumentation wird geladen…');
+  let fotodokuHtml = '';
+  try {
+    const fdItems = await SB.Items.listFotodoku(project.id);
+    if (fdItems.length) {
+      const fdSections = await Promise.all(fdItems.map(async item => {
+        const photos = await SB.Photos.list(item.id);
+        const comp   = await Promise.all(photos.map(async p => ({
+          ...p, dataUrl: await compressImage(p.dataUrl, 800, 0.70)
+        })));
+        return { item, photos: comp };
+      }));
+      fotodokuHtml = `
+      <div style="page-break-before:always;margin-top:20px">
+        <h2 style="font-size:13pt;color:#1b5e20;margin:0 0 14px;border-bottom:2px solid #4caf50;padding-bottom:5px">Fotodokumentation</h2>
+        ${fdSections.map(({ item, photos }) => `
+          <div style="margin-bottom:20px;break-inside:avoid">
+            <h3 style="font-size:11pt;font-weight:700;margin-bottom:6px;color:#333">${esc(item.title)}</h3>
+            ${item.notes ? `<div style="font-size:10pt;color:#555;margin-bottom:8px;white-space:pre-wrap">${esc(item.notes)}</div>` : ''}
+            ${photos.length ? `
+              <div style="display:flex;flex-wrap:wrap;gap:10px">
+                ${photos.map((ph, j) => `
+                  <figure style="margin:0">
+                    <img src="${ph.dataUrl}" style="width:160px;height:120px;object-fit:cover;border-radius:4px;border:1px solid #ddd;display:block">
+                    <figcaption style="font-size:8pt;color:#555;margin-top:3px;word-break:break-word;font-style:italic">${esc(ph.description) || ('Foto ' + (j + 1))}</figcaption>
+                  </figure>`).join('')}
+              </div>` : ''}
+          </div>`).join('')}
+      </div>`;
+    }
+  } catch (e) { console.warn('[PDF] Fotodokumentation konnten nicht geladen werden:', e); }
+
   const itemsHtml = Object.entries(grouped).map(([cat, catItems]) => `
     <div class="category">
       <h3>${esc(cat)}</h3>
@@ -1066,6 +1134,7 @@ async function generatePdf() {
   <div class="progress-label">Fortschritt: ${checked} / ${items.length} geprüft (${pct}%)</div>
   ${itemsHtml}
   ${floorPlanHtml}
+  ${fotodokuHtml}
   </body></html>`;
 
   // Button zurücksetzen
@@ -1356,8 +1425,10 @@ document.addEventListener('DOMContentLoaded', () => {
       e.target.value = '';
     }
   }
-  document.getElementById('photo-input-camera').addEventListener('change',  handlePhotoInput);
-  document.getElementById('photo-input-gallery').addEventListener('change', handlePhotoInput);
+  document.getElementById('photo-input-camera').addEventListener('change',   handlePhotoInput);
+  document.getElementById('photo-input-gallery').addEventListener('change',  handlePhotoInput);
+  document.getElementById('fotodoku-input-camera').addEventListener('change',  handleFotodokuPhotoInput);
+  document.getElementById('fotodoku-input-gallery').addEventListener('change', handleFotodokuPhotoInput);
 
   // Auth-Zustand beobachten
   // sessionActive-Flag verhindert Navigation bei Token-Refresh / Kamera-Rückkehr
@@ -1422,6 +1493,204 @@ window.deleteFloorPlan      = deleteFloorPlan;
 window.savePinModal         = savePinModal;
 window.deletePinModal       = deletePinModal;
 window.onPinPhoto           = onPinPhoto;
+
+// ── Fotodokumentation ─────────────────────────────────────────────────────────
+async function openFotodoku(projectId) {
+  currentProjectId = projectId;
+  showView('fotodoku', 'Fotodokumentation');
+  document.getElementById('fotodoku-list').innerHTML =
+    '<div style="text-align:center;padding:30px;color:var(--outline)">Laden…</div>';
+  try {
+    cachedFotodokuItems = await SB.Items.listFotodoku(projectId);
+    await renderFotodoku();
+  } catch (e) { toast('Fehler: ' + e.message); }
+}
+
+async function renderFotodoku() {
+  const list = document.getElementById('fotodoku-list');
+  if (!cachedFotodokuItems.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📸</div>
+        <div class="empty-title">Keine Begehungen dokumentiert</div>
+        <div class="empty-sub">Tippen Sie auf „+ Neue Begehung" um zu beginnen</div>
+      </div>`;
+    return;
+  }
+  const cards = await Promise.all(
+    cachedFotodokuItems.map(async item => {
+      const photos = await SB.Photos.list(item.id);
+      return renderFotodokuCard(item, photos);
+    })
+  );
+  list.innerHTML = cards.join('');
+}
+
+function renderFotodokuCard(item, photos) {
+  const thumbs = photos.map(ph => `
+    <div class="photo-thumb" onclick="showFotodokuPhotoModal('${ph.id}','${item.id}')">
+      <img src="${ph.dataUrl}" alt="${esc(ph.description || '')}">
+      ${ph.description ? `<div class="photo-caption">${esc(ph.description)}</div>` : ''}
+      <button class="photo-delete"
+              onclick="event.stopPropagation();deleteFotodokuPhoto('${ph.id}','${item.id}')"
+              title="Löschen">×</button>
+    </div>`).join('');
+
+  return `
+    <div class="card card-body" id="fdcard-${item.id}" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="text" id="fdtitle-${item.id}" value="${esc(item.title)}"
+               placeholder="Bezeichnung (z. B. Rohbauabnahme 15.06.2026)"
+               style="flex:1;font-weight:700;font-size:15px;border:none;border-bottom:1px solid var(--outline-variant);
+                      background:transparent;padding:4px 0;color:var(--on-surface);outline:none"
+               onblur="saveFotodokuTitle('${item.id}',this.value)">
+        <button class="btn btn-outline"
+                style="padding:4px 10px;font-size:13px;flex-shrink:0;border-color:var(--error);color:var(--error)"
+                onclick="deleteFotodokuEntry('${item.id}')">🗑️</button>
+      </div>
+      <textarea id="fdnotes-${item.id}" placeholder="Notizen zur Begehung…" rows="2"
+                style="width:100%;resize:vertical;font-size:13px;border:1px solid var(--outline-variant);
+                       border-radius:8px;padding:8px;background:var(--surface-variant);
+                       color:var(--on-surface);box-sizing:border-box"
+                oninput="scheduleFotodokuNotesSave('${item.id}',this.value)">${esc(item.notes)}</textarea>
+      <div style="margin-top:10px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">Fotos</div>
+        <div class="photo-grid" id="fdphotos-${item.id}">
+          ${thumbs}
+          <div class="photo-add-btn" onclick="fotodokuCameraClick('${item.id}')" title="Kamera">
+            📷<span class="photo-add-label">Kamera</span>
+          </div>
+          <div class="photo-add-btn" onclick="fotodokuGalleryClick('${item.id}')" title="Galerie">
+            🖼️<span class="photo-add-label">Galerie</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function newBegehung() {
+  const today = new Date().toLocaleDateString('de-DE');
+  try {
+    const item = await SB.Items.insert({
+      category: FOTODOKU_CAT, title: `Begehung ${today}`,
+      description: '', isMandatory: false, isChecked: false,
+      isNotApplicable: false, isCustom: true, notes: '', sortOrder: Date.now()
+    }, currentProjectId);
+    cachedFotodokuItems.unshift(item);
+    await renderFotodoku();
+    window.scrollTo(0, 0);
+    document.getElementById(`fdtitle-${item.id}`)?.focus();
+  } catch (e) { toast('Fehler: ' + e.message); }
+}
+
+async function deleteFotodokuEntry(itemId) {
+  if (!confirm('Begehung und alle zugehörigen Fotos löschen?')) return;
+  try {
+    const photos = await SB.Photos.list(itemId);
+    for (const ph of photos) await SB.Photos.delete(ph.id);
+    await SB.Items.delete(itemId);
+    cachedFotodokuItems = cachedFotodokuItems.filter(i => i.id !== itemId);
+    await renderFotodoku();
+    toast('Begehung gelöscht');
+  } catch (e) { toast('Fehler: ' + e.message); }
+}
+
+async function saveFotodokuTitle(itemId, value) {
+  const item = cachedFotodokuItems.find(i => i.id === itemId);
+  if (!item) return;
+  item.title = value.trim() || 'Begehung';
+  try { await SB.Items.updateFotodoku(item); } catch (e) { toast('Fehler: ' + e.message); }
+}
+
+function scheduleFotodokuNotesSave(itemId, value) {
+  clearTimeout(fotodokuNoteTimers[itemId]);
+  fotodokuNoteTimers[itemId] = setTimeout(async () => {
+    const item = cachedFotodokuItems.find(i => i.id === itemId);
+    if (!item) return;
+    item.notes = value;
+    try { await SB.Items.updateFotodoku(item); } catch (e) { toast('Fehler: ' + e.message); }
+  }, 800);
+}
+
+function fotodokuCameraClick(itemId) {
+  fotodokuActiveItemId = itemId;
+  currentItemId        = itemId; // für Grundriss-Zuweisung
+  document.getElementById('fotodoku-input-camera').click();
+}
+function fotodokuGalleryClick(itemId) {
+  fotodokuActiveItemId = itemId;
+  currentItemId        = itemId;
+  document.getElementById('fotodoku-input-gallery').click();
+}
+
+async function handleFotodokuPhotoInput(e) {
+  const file = e.target.files[0];
+  if (!file || !fotodokuActiveItemId) return;
+  const itemId = fotodokuActiveItemId;
+  try {
+    const raw    = await fileToDataUrl(file);
+    const dataUrl = await compressImage(raw);
+    const photo  = await SB.Photos.save({ checklistItemId: itemId, dataUrl, description: '' });
+    await renderFotodokuPhotoGrid(itemId);
+    e.target.value = '';
+    photoModalCloseCallback = async () => renderFotodokuPhotoGrid(itemId);
+    document.getElementById('modal-photo-img').src    = photo.dataUrl;
+    document.getElementById('modal-photo-desc').value = '';
+    document.getElementById('modal-photo-id').value   = photo.id;
+    document.getElementById('btn-assign-pin').style.display = 'block';
+    document.getElementById('photo-modal').classList.add('open');
+  } catch (err) { toast('Fehler: ' + err.message); e.target.value = ''; }
+}
+
+async function renderFotodokuPhotoGrid(itemId) {
+  const grid = document.getElementById(`fdphotos-${itemId}`);
+  if (!grid) return;
+  const photos = await SB.Photos.list(itemId);
+  grid.innerHTML = photos.map(ph => `
+    <div class="photo-thumb" onclick="showFotodokuPhotoModal('${ph.id}','${itemId}')">
+      <img src="${ph.dataUrl}" alt="${esc(ph.description || '')}">
+      ${ph.description ? `<div class="photo-caption">${esc(ph.description)}</div>` : ''}
+      <button class="photo-delete"
+              onclick="event.stopPropagation();deleteFotodokuPhoto('${ph.id}','${itemId}')"
+              title="Löschen">×</button>
+    </div>`).join('') +
+    `<div class="photo-add-btn" onclick="fotodokuCameraClick('${itemId}')" title="Kamera">
+      📷<span class="photo-add-label">Kamera</span>
+    </div>` +
+    `<div class="photo-add-btn" onclick="fotodokuGalleryClick('${itemId}')" title="Galerie">
+      🖼️<span class="photo-add-label">Galerie</span>
+    </div>`;
+}
+
+async function showFotodokuPhotoModal(photoId, itemId) {
+  fotodokuActiveItemId = itemId;
+  currentItemId        = itemId;
+  photoModalCloseCallback = async () => renderFotodokuPhotoGrid(itemId);
+  const photos = await SB.Photos.list(itemId);
+  const photo  = photos.find(p => p.id === photoId);
+  if (!photo) return;
+  document.getElementById('modal-photo-img').src    = photo.dataUrl;
+  document.getElementById('modal-photo-desc').value = photo.description || '';
+  document.getElementById('modal-photo-id').value   = photoId;
+  document.getElementById('btn-assign-pin').style.display = 'block';
+  document.getElementById('photo-modal').classList.add('open');
+}
+
+async function deleteFotodokuPhoto(photoId, itemId) {
+  if (!confirm('Foto löschen?')) return;
+  await SB.Photos.delete(photoId);
+  await renderFotodokuPhotoGrid(itemId);
+}
+
+window.openFotodoku          = openFotodoku;
+window.newBegehung           = newBegehung;
+window.deleteFotodokuEntry   = deleteFotodokuEntry;
+window.saveFotodokuTitle     = saveFotodokuTitle;
+window.scheduleFotodokuNotesSave = scheduleFotodokuNotesSave;
+window.fotodokuCameraClick   = fotodokuCameraClick;
+window.fotodokuGalleryClick  = fotodokuGalleryClick;
+window.showFotodokuPhotoModal = showFotodokuPhotoModal;
+window.deleteFotodokuPhoto   = deleteFotodokuPhoto;
 
 // ── Grundrissplan ─────────────────────────────────────────────────────────────
 async function openFloorPlan() {

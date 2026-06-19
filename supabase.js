@@ -71,6 +71,18 @@ const Items = {
     return chk(await sb.from('checklist_items').select('*')
       .eq('project_id', projectId).order('sort_order')).map(rowToItem);
   },
+  async listFotodoku(projectId) {
+    return chk(await sb.from('checklist_items').select('*')
+      .eq('project_id', projectId)
+      .eq('category', '__FOTODOKU__')
+      .order('created_at', { ascending: false })).map(rowToItem);
+  },
+  async updateFotodoku(item) {
+    chk(await sb.from('checklist_items').update({
+      title: item.title || '',
+      notes: item.notes || ''
+    }).eq('id', item.id));
+  },
   async insertMany(projectId, items) {
     const uid = await getUid();
     const rows = items.map(item => itemToRow(item, projectId, uid));
