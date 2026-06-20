@@ -1574,7 +1574,7 @@ async function newBegehung() {
     const item = await SB.Items.insert({
       category: FOTODOKU_CAT, title: `Begehung ${today}`,
       description: '', isMandatory: false, isChecked: false,
-      isNotApplicable: false, isCustom: true, notes: '', sortOrder: Date.now()
+      isNotApplicable: false, isCustom: true, notes: '', sortOrder: 0
     }, currentProjectId);
     cachedFotodokuItems.unshift(item);
     await renderFotodoku();
